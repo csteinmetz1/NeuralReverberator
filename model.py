@@ -81,4 +81,4 @@ def build_vae_model(n_samples, n_ch):
 	vae.compile(optimizer=optimizers.Adam(), loss=None)
 	vae.summary()
 
-	return vae
+	return encoder, decoder, vae

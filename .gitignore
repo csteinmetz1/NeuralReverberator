@@ -1,8 +1,10 @@
 # general
 __pycache__
 .vscode
+*.zip
 
 # project
+results/
 archives/
 data/
 data_16k/
