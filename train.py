@@ -3,8 +3,8 @@ from model import build_vae_model
 from keras.callbacks import LambdaCallback
 
 # hyperparameters
-epochs = 10
-batch_size = 10
+epochs = 50
+batch_size = 100
 latent_dim = 2
 
 # input
@@ -24,7 +24,7 @@ audio_callback = GenerateIRs(15, rate, batch_size, latent_dim, decoder)
 # train the thing
 vae.fit(x=x_train, y=None,
 		shuffle=True,
-		epochs=10,
-		batch_size=10,
+		epochs=epochs,
+		batch_size=batch_size,
 		validation_data=(x_test, None),
 		callbacks=[audio_callback])
