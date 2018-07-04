@@ -4,6 +4,7 @@ __pycache__
 *.zip
 
 # project
+spectrograms/
 results/
 archives/
 data/

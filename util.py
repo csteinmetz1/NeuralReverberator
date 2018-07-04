@@ -11,7 +11,33 @@ import soundfile as sf
 from scipy.stats import norm
 from sklearn.utils import resample
 
-def load_data(dataset_dir, sequence_len, train_split=0.80, n_samples=3000):
+def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
+
+    x = [] # list to hold spectrograms
+    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
+        if idx < n_samples:
+            s = np.loadtxt(sample)
+            x.append(s[:512, :])
+            sys.stdout.write("* Loaded {} RIR spectrogramss\r".format(idx+1))
+            sys.stdout.flush()
+
+    x = np.array(x)
+    print(x.shape)
+
+    train_idx = np.floor(n_samples*train_split).astype('int')
+    x_train = x[:train_idx,:,:]
+    x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], x_train.shape[2], 1))
+    x_test = x[train_idx:,:,:]
+    x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], x_test.shape[2], 1))
+
+    print("Loaded data with shape:")
+    print("x_train: {}".format(x_train.shape))
+    print("x_test:  {}".format(x_test.shape))
+
+    return x_train, x_test 
+
+
+def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples=3000):
     """ 
     Utility function to load Room Impulse Responses.
 
@@ -33,7 +59,7 @@ def load_data(dataset_dir, sequence_len, train_split=0.80, n_samples=3000):
     """
     IRs = [] # list to hold audio data
     load_samples = 0
-    for idx, sample in enumerate(glob.glob("data_16k/*.wav")):
+    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.wav"))):
         data, rate = sf.read(sample, stop=sequence_len, always_2d=True)
         data = librosa.util.fix_length(data, sequence_len, axis=0)
 
@@ -47,6 +73,9 @@ def load_data(dataset_dir, sequence_len, train_split=0.80, n_samples=3000):
 
     x = np.stack(IRs, axis=0)
     x = np.reshape(x, (x.shape[0], x.shape[1], 1))
+
+    if not split:
+        return x
 
     train_idx = np.floor(n_samples*train_split).astype('int')
     x_train = x[:train_idx,:]
@@ -108,7 +137,21 @@ class GenerateIRs(keras.callbacks.Callback):
                 output_path = os.path.join(epoch_dir, "epoch{0}_x{1}_y{2}.wav".format(epoch+1, i, j))
                 sf.write(output_path, data, self.rate)
 
+def generate_spectrograms(dataset_dir, n_fft=1024, n_hop=256):
 
+    if not os.path.isdir("spectrograms"):
+        os.makedirs("spectrograms")
+   
+    x = load_data(dataset_dir, 66304, split=False)
+
+    for idx in range(x.shape[0]):
+        s = np.reshape(x[idx,:,:], (66304,))
+        s = librosa.stft(s, n_fft=n_fft, hop_length=n_hop, center=False)
+        s = librosa.amplitude_to_db(s, ref=2.0)
+        np.savetxt('spectrograms/ir_{}.txt'.format(idx+1), s)
+        sys.stdout.write("* Computed {} RIR spectrograms\r".format(idx+1))
+        sys.stdout.flush()
+        
 def analysis_dataset(dataset_dir):
     for idx, sample in enumerate(glob.glob("data/*.wav")):
         filename = os.path.basename(sample)
