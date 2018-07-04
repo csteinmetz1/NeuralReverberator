@@ -1,0 +1,9 @@
+# general
+__pycache__
+.vscode
+
+# project
+archives/
+data/
+data_16k/
+ira_env/
