@@ -16,10 +16,11 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
     x = [] # list to hold spectrograms
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
         if idx < n_samples:
-            s = np.loadtxt(sample)
-            x.append(s[:512, :])
-            sys.stdout.write("* Loaded {} RIR spectrograms\r".format(idx+1))
-            sys.stdout.flush()
+            s = np.loadtxt(sample)[:512, :]
+            if s.shape == (512, 256):
+                x.append(s)
+                sys.stdout.write("* Loaded {} RIR spectrograms\r".format(idx+1))
+                sys.stdout.flush()
 
     x = np.stack(x, axis=0)
     print(x.shape)
