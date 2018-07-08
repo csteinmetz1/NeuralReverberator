@@ -92,7 +92,7 @@ def build_wavenet_ae(n_samples, n_ch):
 
 def build_spectral_ae(spect_shape):
 
-    latent_dim = 3
+    latent_dim = 1024
 
     f1 = 32
     f2 = 2 * f1
@@ -127,7 +127,7 @@ def build_spectral_ae(spect_shape):
     x = layers.Conv2D(f3, (4,4), padding='same', strides=(2,1))(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
-    x = layers.Conv2D(f4, (1,1), padding='same', strides=(1,1))(x)
+    x = layers.Conv2D(f4, (1,1), padding='same', strides=(2,1))(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
     x = layers.Conv2D(latent_dim, (1,1), padding='same', strides=(1,1))(x)
@@ -161,7 +161,7 @@ def build_spectral_ae(spect_shape):
     x = layers.Conv2DTranspose(f1, (2,2), padding='valid', strides=(2,2))(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
-    x = layers.Conv2DTranspose(f1, (2,1), padding='valid', strides=(2,1))(x)
+    x = layers.Conv2DTranspose(f1, (3,1), padding='valid', strides=(2,1))(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
     output_spect = layers.Conv2DTranspose(1, (1,1), padding='valid', strides=(1,1))(x)
@@ -179,5 +179,5 @@ def build_spectral_ae(spect_shape):
     
     return encoder, decoder, autoencoder
 
-#build_spectral_ae((512, 256, 1))
+#build_spectral_ae((513, 256, 1))
 
