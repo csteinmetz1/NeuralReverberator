@@ -40,7 +40,7 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
 
 def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples=3000):
     """ 
-    Utility function to load Room Impulse Responses.
+    Utility function to load room impulse responses.
 
     Parameters
     ----------
@@ -138,23 +138,53 @@ class GenerateIRs(keras.callbacks.Callback):
                 output_path = os.path.join(epoch_dir, "epoch{0}_x{1}_y{2}.wav".format(epoch+1, i, j))
                 sf.write(output_path, data, self.rate)
 
-def generate_spectrograms(dataset_dir, n_fft=1024, n_hop=256):
+def generate_spectrograms(dataset_dir, n_fft=1024, n_hop=256, augment_data=False):
 
     if not os.path.isdir("spectrograms"):
         os.makedirs("spectrograms")
    
     x = load_data(dataset_dir, 66304, split=False)
 
+    specs_generated = 0
+
     for idx in range(x.shape[0]):
         s = np.reshape(x[idx,:,:], (66304,))
+
+        if augment_data:
+            data = np.reshape(x[idx,:,:], (x[idx,:,:].shape[0],))
+            augmented_audio = augment_audio(data, 16000, stretch_factors=[0.80, 0.90, 1.10, 1.20], shift_factors=[-2, -1, 1, 2])
+            for augment in augmented_audio:
+                aug = librosa.stft(augment, n_fft=n_fft, hop_length=n_hop, center=False)
+                aug = librosa.amplitude_to_db(s, ref=2.0)
+                np.savetxt('spectrograms/ir_{}.txt'.format(specs_generated+1), aug)
+                specs_generated += 1
+        
         s = librosa.stft(s, n_fft=n_fft, hop_length=n_hop, center=False)
         s = librosa.amplitude_to_db(s, ref=2.0)
-        np.savetxt('spectrograms/ir_{}.txt'.format(idx+1), s)
-        sys.stdout.write("* Computed {} RIR spectrograms\r".format(idx+1))
+        np.savetxt('spectrograms/ir_{}.txt'.format(specs_generated), s)
+        specs_generated += 1
+        print("\n* Computed {} RIR spectrograms".format(specs_generated))
+
+def augment_audio(data, rate, stretch_factors=[], shift_factors=[]):
+
+    augmented_audio = []
+
+    # stretch audio
+    for stretch_factor in stretch_factors:
+        sys.stdout.write("* Strecthing audio by {}...\r".format(stretch_factor))
         sys.stdout.flush()
-        
+        augmented_audio.append(librosa.effects.time_stretch(data, stretch_factor))
+    
+    for shift_factor in shift_factors:
+        sys.stdout.write("* Pitching audio by {}...\r".format(shift_factor))
+        sys.stdout.flush()
+        augmented_audio.append(librosa.effects.pitch_shift(data, rate, shift_factor))
+
+    return augmented_audio
+
 def analysis_dataset(dataset_dir):
     for idx, sample in enumerate(glob.glob("data/*.wav")):
         filename = os.path.basename(sample)
         audio, rate = sf.read(sample)
-        
+
+generate_spectrograms('data_16k', augment_data=True)
