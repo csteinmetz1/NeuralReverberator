@@ -90,16 +90,14 @@ def build_wavenet_ae(n_samples, n_ch):
     batch_size = 10
     latent_dim = 2
 
-def build_spectral_ae(spect_shape):
+def build_spectral_ae(input_shape=(513, 256, 1), latent_dim=3, n_filters=[32, 64, 128, 256, 512], lr=0.001):
 
-    latent_dim = 1024
+    f1 = n_filters[0]
+    f2 = n_filters[1]
+    f3 = n_filters[2]
+    f4 = n_filters[3]
 
-    f1 = 32
-    f2 = 2 * f1
-    f3 = 2 * f2
-    f4 = 3 * f3
-
-    input_spect = layers.Input(spect_shape)
+    input_spect = layers.Input(input_shape)
     x = layers.Conv2D(f1, (5,5), padding='same', strides=(2,2))(input_spect)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
@@ -174,10 +172,7 @@ def build_spectral_ae(spect_shape):
 
     outputs = decoder(encoder(input_spect))
     autoencoder = Model(input_spect, outputs)
-    autoencoder.compile(optimizer='adam', loss='mean_squared_error')
+    autoencoder.compile(optimizer=optimizers.Adam(lr=lr), loss='mean_squared_error')
     autoencoder.summary()
     
     return encoder, decoder, autoencoder
-
-#build_spectral_ae((513, 256, 1))
-

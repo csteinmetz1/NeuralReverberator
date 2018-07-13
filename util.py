@@ -12,6 +12,25 @@ from scipy.stats import norm
 from sklearn.utils import resample
 
 def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
+    """
+    Utility function to spectogram data.
+
+    Parameters
+    ----------
+    dataset_dir : str
+        Directory containing the dataset.
+    train_split : float, optional
+        Fraction of the data to return as training samples.
+    n_samples : int, optional
+        Number of total dataset examples to load.
+
+    Returns
+    -------
+    x_train : ndarray
+        Training set (n_samples, n_freq_bins, n_time).
+    x_test : ndarray
+        Testing set (n_samples, n_freq_bins, n_time).
+    """
 
     x = [] # list to hold spectrograms
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
@@ -45,18 +64,20 @@ def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples
     Parameters
     ----------
     dataset_dir : str
-        Directory containing the dataset
+        Directory containing the dataset.
     sequence_len : int
-        Length of the RIRs when loading
+        Length of the RIRs when loading.
     train_split : float, optional
-        Fraction of the data to return as training samples
+        Fraction of the data to return as training samples.
+    n_samples : int, optional
+        Number of total dataset examples to load.
 
     Returns
     -------
     x_train : ndarray
-        Training examples with shape (examples, audio samples)
+        Training examples with shape (examples, audio samples).
     x_test : ndarray
-        Testing examples with shape (examples, audio samples)		
+        Testing examples with shape (examples, audio samples).	
     """
     IRs = [] # list to hold audio data
     load_samples = 0
@@ -95,11 +116,11 @@ def convert_sample_rate(dataset_dir, output_dir, out_sample_rate):
     Parameters
     ----------
     dataset_dir : str
-        Directory containing the dataset
+        Directory containing the dataset.
     output_dir : str
-        Directory to store outputs
+        Directory to store outputs.
     out_sample_rate : int
-        Desired output sample rate
+        Desired output sample rate.
     """
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
@@ -138,35 +159,71 @@ class GenerateIRs(keras.callbacks.Callback):
                 output_path = os.path.join(epoch_dir, "epoch{0}_x{1}_y{2}.wav".format(epoch+1, i, j))
                 sf.write(output_path, data, self.rate)
 
-def generate_spectrograms(dataset_dir, n_fft=1024, n_hop=256, augment_data=False):
+def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=1024, n_hop=256, augment_data=False):
+    """ 
+    Generate spectrograms (via stft) on dataset of audio data.
 
-    if not os.path.isdir("spectrograms"):
-        os.makedirs("spectrograms")
+    Parameters
+    ----------
+    dataset_dir : str
+        Directory containing the dataset.
+    output_dir : str
+        Directory to store outputs.
+    sequence_len : int
+        Length of output audio data.
+    rate : int
+        Sample rate out input audio data.
+    n_fft : int, optional
+        Size of the FFT to generate spectrograms.
+    n_hop : int, optional
+        Hop size for FFT.
+    augment_data : bool, optional
+        Generate augmented (stretched and shifted) audio.
+    """
+
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
    
-    x = load_data(dataset_dir, 66304, split=False)
+    x = load_data(dataset_dir, sequence_len, split=False)
 
     specs_generated = 0
 
     for idx in range(x.shape[0]):
-        s = np.reshape(x[idx,:,:], (66304,))
+        s = np.reshape(x[idx,:,:], (sequence_len,))
 
         if augment_data:
-            data = np.reshape(x[idx,:,:], (x[idx,:,:].shape[0],))
+            data = np.reshape(x[idx,:,:], (sequence_len,))
             augmented_audio = augment_audio(data, 16000, stretch_factors=[0.80, 0.90, 1.10, 1.20], shift_factors=[-2, -1, 1, 2])
             for augment in augmented_audio:
-                aug = librosa.stft(augment, n_fft=n_fft, hop_length=n_hop, center=False)
-                aug = librosa.amplitude_to_db(s, ref=2.0)
+                aug = librosa.util.fix_length(augment, sequence_len)
+                aug = librosa.stft(aug, n_fft=n_fft, hop_length=n_hop, center=True)
+                aug = np.abs(aug)**2
+                aug *= (1.0 / np.amax(aug))
                 np.savetxt('spectrograms/ir_{}.txt'.format(specs_generated+1), aug)
                 specs_generated += 1
         
-        s = librosa.stft(s, n_fft=n_fft, hop_length=n_hop, center=False)
-        s = librosa.amplitude_to_db(s, ref=2.0)
+        s = librosa.stft(s, n_fft=n_fft, hop_length=n_hop, center=True)
+        s = np.abs(s)**2
+        s *= (1.0 / np.amax(s))
         np.savetxt('spectrograms/ir_{}.txt'.format(specs_generated), s)
         specs_generated += 1
-        print("\n* Computed {} RIR spectrograms".format(specs_generated))
+        print("* Computed {} RIR spectrograms".format(specs_generated))
 
 def augment_audio(data, rate, stretch_factors=[], shift_factors=[]):
+    """ 
+    Perform data augmentation (stretching and pitch shifting) on input data.
 
+    Parameters
+    ----------
+    data : ndarray
+        Monophonic autio data.
+    rate : int
+        Sample rate out input audio data.
+    stretch_factors : list of floats
+        List of factors to stretch the input data by.
+    shift_factors : list of floats
+        List of factors to pitch the input data by.
+    """
     augmented_audio = []
 
     # stretch audio
@@ -175,6 +232,7 @@ def augment_audio(data, rate, stretch_factors=[], shift_factors=[]):
         sys.stdout.flush()
         augmented_audio.append(librosa.effects.time_stretch(data, stretch_factor))
     
+    # pitch shift audio
     for shift_factor in shift_factors:
         sys.stdout.write("* Pitching audio by {}...\r".format(shift_factor))
         sys.stdout.flush()
@@ -186,5 +244,3 @@ def analysis_dataset(dataset_dir):
     for idx, sample in enumerate(glob.glob("data/*.wav")):
         filename = os.path.basename(sample)
         audio, rate = sf.read(sample)
-
-generate_spectrograms('data_16k', augment_data=True)
