@@ -5,8 +5,10 @@ __pycache__
 
 # project
 spectrograms/
+spect_plots/
 results/
 archives/
 data/
 data_16k/
+irvae_env/
 ira_env/
