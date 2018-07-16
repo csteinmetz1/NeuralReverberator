@@ -1,7 +1,9 @@
 import os
 import sys
+import csv
 import glob
 import librosa
+import shutil
 import warnings
 import subprocess
 import keras
@@ -11,9 +13,14 @@ import soundfile as sf
 from scipy.stats import norm
 from sklearn.utils import resample
 
-def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
+import matplotlib as mpl 
+mpl.use('agg')
+import matplotlib.pyplot as plt
+import librosa.display
+
+def load_spectrograms(dataset_dir, train_split=0.80, n_samples=None):
     """
-    Utility function to spectogram data.
+    Utility function to load spectogram data.
 
     Parameters
     ----------
@@ -22,7 +29,8 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
     train_split : float, optional
         Fraction of the data to return as training samples.
     n_samples : int, optional
-        Number of total dataset examples to load.
+        Number of total dataset examples to load. 
+        (Deafults to full size of the dataset)
 
     Returns
     -------
@@ -31,18 +39,25 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
     x_test : ndarray
         Testing set (n_samples, n_freq_bins, n_time).
     """
+    if n_samples is None: # set number of samples to full dataset
+        n_samples = len(glob.glob(os.path.join(dataset_dir, "*.txt")))
 
     x = [] # list to hold spectrograms
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
         if idx < n_samples:
             s = np.loadtxt(sample)
-            if s.shape == (513, 256):
-                x.append(s)
-                sys.stdout.write("* Loaded {} RIR spectrograms\r".format(idx+1))
-                sys.stdout.flush()
+
+            if s.shape[1] < 256: # pad the input to be of shape (513, 256)
+                out = np.zeros((513, 256))
+                out[:s.shape[0],:s.shape[1]] = s
+            else: # crop the input to be of shape (513, 256)
+                out = s[:,:256]
+
+            x.append(out)
+            sys.stdout.write(f"* Loaded {idx+1}/{n_samples} RIR spectrograms\r")
+            sys.stdout.flush()
 
     x = np.stack(x, axis=0)
-    print(x.shape)
 
     train_idx = np.floor(n_samples*train_split).astype('int')
     x_train = x[:train_idx,:,:]
@@ -50,14 +65,13 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=3000):
     x_test = x[train_idx:,:,:]
     x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], x_test.shape[2], 1))
 
-    print("Loaded data with shape:")
     print("x_train: {}".format(x_train.shape))
     print("x_test:  {}".format(x_test.shape))
 
     return x_train, x_test 
 
 
-def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples=3000):
+def load_data(dataset_dir, split=True, train_split=0.80):
     """ 
     Utility function to load room impulse responses.
 
@@ -65,12 +79,8 @@ def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples
     ----------
     dataset_dir : str
         Directory containing the dataset.
-    sequence_len : int
-        Length of the RIRs when loading.
     train_split : float, optional
         Fraction of the data to return as training samples.
-    n_samples : int, optional
-        Number of total dataset examples to load.
 
     Returns
     -------
@@ -80,24 +90,24 @@ def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples
         Testing examples with shape (examples, audio samples).	
     """
     IRs = [] # list to hold audio data
+    sample_names = [] # temp list - delete this later
     load_samples = 0
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.wav"))):
-        data, rate = sf.read(sample, stop=sequence_len, always_2d=True)
-        data = librosa.util.fix_length(data, sequence_len, axis=0)
+        data, rate = sf.read(sample, always_2d=True)
 
         for ch in range(data.shape[1]):
-            if load_samples < n_samples:
-                IRs.append(data[:,ch])
-                load_samples += 1
+            IRs.append(data[:,ch])
+            load_samples += 1
+            sample_names.append(os.path.basename(sample).replace('.wav', ''))
 
-        sys.stdout.write("* Loaded {} RIRs\r".format(idx+1))
+        sys.stdout.write("* Loaded {} RIRs\r".format(load_samples+1))
         sys.stdout.flush()
+
+    if not split:
+        return IRs, sample_names
 
     x = np.stack(IRs, axis=0)
     x = np.reshape(x, (x.shape[0], x.shape[1], 1))
-
-    if not split:
-        return x
 
     train_idx = np.floor(n_samples*train_split).astype('int')
     x_train = x[:train_idx,:]
@@ -107,7 +117,7 @@ def load_data(dataset_dir, sequence_len, split=True, train_split=0.80, n_samples
     print("x_train: {}".format(x_train.shape))
     print("x_test:  {}".format(x_test.shape))
 
-    return x_train, x_test 
+    return x_train, x_test
 
 def convert_sample_rate(dataset_dir, output_dir, out_sample_rate):
     """ 
@@ -159,7 +169,7 @@ class GenerateIRs(keras.callbacks.Callback):
                 output_path = os.path.join(epoch_dir, "epoch{0}_x{1}_y{2}.wav".format(epoch+1, i, j))
                 sf.write(output_path, data, self.rate)
 
-def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=1024, n_hop=256, augment_data=False):
+def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=1024, n_hop=256, augment_data=False, save_plots=False):
     """ 
     Generate spectrograms (via stft) on dataset of audio data.
 
@@ -184,30 +194,82 @@ def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=102
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
    
-    x = load_data(dataset_dir, sequence_len, split=False)
+    IRs, sample_names = load_data(dataset_dir, split=False)
 
     specs_generated = 0
+    n_specs = len(IRs)
 
-    for idx in range(x.shape[0]):
-        s = np.reshape(x[idx,:,:], (sequence_len,))
+    for idx in range(len(IRs)):
+        audio = np.reshape(IRs[idx], (IRs[idx].shape[0],))
 
         if augment_data:
-            data = np.reshape(x[idx,:,:], (sequence_len,))
-            augmented_audio = augment_audio(data, 16000, stretch_factors=[0.80, 0.90, 1.10, 1.20], shift_factors=[-2, -1, 1, 2])
+            
+            augmented_audio = augment_audio(audio, 16000, 
+                                            stretch_factors=[0.80, 0.90, 1.10, 1.20], 
+                                            shift_factors=[-2, -1, 1, 2])
+            n_specs = len(IRs) * (len(stretch_factors) + len(shift_factors))                                
             for augment in augmented_audio:
-                aug = librosa.util.fix_length(augment, sequence_len)
-                aug = librosa.stft(aug, n_fft=n_fft, hop_length=n_hop, center=True)
-                aug = np.abs(aug)**2
-                aug *= (1.0 / np.amax(aug))
-                np.savetxt('spectrograms/ir_{}.txt'.format(specs_generated+1), aug)
+                S = librosa.stft(augment, n_fft=n_fft, hop_length=n_hop, center=True)
+                power_spectra = np.abs(S)**2
+                log_power_spectra = librosa.power_to_db(power_spectra)
+                _min = np.amin(log_power_spectra)
+                print(_min)
+                print(_max)
+                _max = np.amax(log_power_spectra)
+                normalized_log_power_spectra = (log_power_spectra - _min) / (_max - _min)
+                filename = f"ir_{sample_names[idx]}_{specs_generated+1}"
+                np.savetxt(os.path.join(output_dir, filename + ".txt"), normalized_log_power_spectra)
                 specs_generated += 1
+
+                if save_plots:
+                    if not os.path.isdir("spect_plots"):
+                        os.makedirs("spect_plots")
+                    plot_spectrograms(log_power_spectra, normalized_log_power_spectra, 
+                                      16000, filename + ".png", "spect_plots")
         
-        s = librosa.stft(s, n_fft=n_fft, hop_length=n_hop, center=True)
-        s = np.abs(s)**2
-        s *= (1.0 / np.amax(s))
-        np.savetxt('spectrograms/ir_{}.txt'.format(specs_generated), s)
+        S = librosa.stft(audio, n_fft=n_fft, hop_length=n_hop, center=True)
+        power_spectra = np.abs(S)**2
+        log_power_spectra = librosa.power_to_db(power_spectra)
+        _min = np.amin(log_power_spectra)
+        _max = np.amax(log_power_spectra)
+        normalized_log_power_spectra = (log_power_spectra - _min) / (_max - _min)
+        filename = f"ir_{sample_names[idx]}_{specs_generated+1}"
+        np.savetxt(os.path.join(output_dir, filename + ".txt"), normalized_log_power_spectra)
         specs_generated += 1
-        print("* Computed {} RIR spectrograms".format(specs_generated))
+
+        if save_plots:
+            if not os.path.isdir("spect_plots"):
+                os.makedirs("spect_plots")
+            plot_spectrograms(normalized_log_power_spectra, 16000, filename + ".png", "spect_plots")
+
+        sys.stdout.write(f"* Computed {specs_generated}/{n_specs} RIR spectrograms\r")
+        sys.stdout.flush()
+
+def plot_spectrograms(log_power_spectra, rate, filename, output_dir):
+    """ 
+    Save log-power and normalized log-power specotrgrams to file.
+
+    Parameters
+    ----------
+    log_power_spectra : ndarray
+        Comptued Log-Power spectra.
+    normalized_power_spectra : ndarray
+        Computed normalized (between 0 and 1) Log-Power spectra.
+    rate : int
+        Sample rate out input audio data.
+    filename : str
+        Output filename for generated plot.
+    output_dir : str
+        Directory to save generated plot. (must exist)
+    """
+
+    plt.figure()
+    librosa.display.specshow(log_power_spectra, sr=rate*2, y_axis='log', x_axis='time')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title('Log-Power spectrogram')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, filename))
+    plt.close('all')
 
 def augment_audio(data, rate, stretch_factors=[], shift_factors=[]):
     """ 
@@ -240,7 +302,148 @@ def augment_audio(data, rate, stretch_factors=[], shift_factors=[]):
 
     return augmented_audio
 
-def analysis_dataset(dataset_dir):
-    for idx, sample in enumerate(glob.glob("data/*.wav")):
+def clean_dataset(dataset_dir, reject_dir, min_len=0.5, max_len=6.0):
+    """ 
+    Analyze the dataset and remove samples that do not fall
+    within the supplied limits.
+
+    Parameters
+    ----------
+    dataset_dir : str
+        Directory containing the dataset.
+    reject_dir : str
+        Directory to move rejected samples to.
+    min_len : float
+        Minimum valid length of audio in seconds.
+    max_len : float
+        Maximum valid length of audio in seconds.
+    """    
+
+    if not os.path.isdir(reject_dir):
+        os.makedirs(reject_dir)
+
+    n_rejected = 0
+
+    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.wav"))):
+        data, rate = sf.read(sample, always_2d=True)
+
+        length = data.shape[0] / 16000.
         filename = os.path.basename(sample)
-        audio, rate = sf.read(sample)
+
+        if length < min_len: # move IRs that are too short
+            shutil.move(sample, os.path.join(reject_dir, filename))
+            n_rejected += 1
+        elif length > max_len: # move but also shorten long IRs
+            shutil.move(sample, os.path.join(reject_dir, filename))
+            shortened_data = data[:int(max_len*16000),:]
+            sf.write(os.path.join(dataset_dir, "short_" + filename), shortened_data, 16000)
+            n_rejected += 1
+
+        sys.stdout.write("* Analyzed {0:4} RIRs | {1:4} accepted | {2:4} rejected\r".format(idx+1, idx+1-n_rejected, n_rejected))
+        sys.stdout.flush()
+
+    print("* Analyzed {0:4} RIRs | {1:4} accepted | {2:4} rejected\r".format(idx+1, idx+1-n_rejected, n_rejected))
+    print("Cleaning complete.")
+
+def analyze_dataset(dataset_dir,):
+    """ 
+    Analyze and calculate relevant statistics on the dataset.
+
+    Parameters
+    ----------
+    dataset_dir : str
+        Directory containing the dataset.
+    """
+    analysis = []
+
+    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.wav"))):
+        data, rate = sf.read(sample, always_2d=True)
+
+        analysis.append(
+            {'Name' : os.path.basename(sample).replace('.wav', ''),
+             'Channels' : data.shape[1],
+             'Samples' : data.shape[0],
+             'Length' : data.shape[0] / 16000.,
+             'RMSE' : np.mean(librosa.feature.rmse(y=data.T)),
+             'Flatness' : np.mean(librosa.feature.spectral_flatness(y=data[:,0]))})
+
+        sys.stdout.write("* Analyzed {} RIRs\r".format(idx+1))
+        sys.stdout.flush()
+
+    with open('complete_stats.csv', 'w', newline='') as csvfile:
+        c = csv.DictWriter(csvfile, fieldnames=analysis[0].keys())
+        c.writeheader()
+        c.writerows(analysis)        
+
+    channels = [sample['Channels'] for sample in analysis]
+    samples = [sample['Samples'] for sample in analysis]
+    length = [sample['Length'] for sample in analysis]
+    rmse = [sample['RMSE'] for sample in analysis]
+    flatness = [sample['Flatness'] for sample in analysis]
+
+    mean_channels = np.mean(channels)
+    min_channels = np.min(channels)
+    max_channels = np.max(channels)
+
+    mean_samples = np.mean(samples)
+    min_samples = np.min(samples)
+    max_samples = np.max(samples)
+
+    mean_length = np.mean(length)
+    min_length = np.min(length)
+    max_length = np.max(length)
+
+    with open('collected_stats.csv', 'w', newline='') as csvfile:
+        c = csv.DictWriter(csvfile, fieldnames=['Metric', 'Min', 'Max', 'Mean'])
+        c.writeheader()
+        c.writerow({'Metric' : 'Channels', 'Min' : min_channels, 'Max' : max_channels, 'Mean' : mean_channels})
+        c.writerow({'Metric' : 'Samples', 'Min' : min_samples, 'Max' : max_samples, 'Mean' : mean_samples})
+        c.writerow({'Metric' : 'Length', 'Min' : min_length, 'Max' : max_length, 'Mean' : mean_length})  
+
+
+def generate_report(report_dir, r, msg=''):
+    with open(os.path.join(report_dir, "report_summary.txt"), 'w') as results:
+        results.write("--- RUNTIME ---\n")
+        results.write(f"Start time: {r['start time']}\n")
+        results.write(f"End time:   {r['end time']}\n")
+        results.write(f"Runtime:    {r['end time'] - r['start time']}\n\n")
+        results.write("--- MESSAGE ---\n")
+        results.write(f"{msg}\n\n")
+        results.write("--- MSE RESULTS ---\n")
+        val_losses = []
+        for fold, track_id in zip(r["history"], r["index list"]):
+            results.write(f"* Track {track_id}\n")
+            results.write("    train   |  val\n")
+            for epoch, (train_loss, val_loss) in enumerate(zip(fold.history["loss"], 
+                                                        fold.history["val_loss"])):
+                results.write("{0}: {1:0.6f}   {2:0.6f}\n".format(epoch+1, 
+                                                train_loss, val_loss))
+            val_losses.append(val_loss)
+            results.write("\n")
+        final_loss = np.mean(val_losses)
+        results.write(f"Avg. val loss: {0:0.6f}\n".format(final_loss))
+        results.write("\n--- TRAINING DETAILS ---\n")
+        results.write(f"Batch size:  {r['batch size']}\n")
+        results.write(f"Epochs:      {r['epochs']}\n")
+        results.write(f"Input shape: {r['input shape']}\n")
+        results.write(f"Model type:  {r['model type']}\n")
+        results.write(f"Folds:       {r['folds']:d}\n")
+        results.write(f"Learning:    {r['learning rate']:f}\n")
+        results.write("\n--- NETWORK ARCHITECTURE ---\n")
+        r["model"].summary(print_fn=lambda x: results.write(x + '\n'))
+        
+        val_loss = [fold.history['val_loss'] for fold in r['history']]
+        train_loss = [fold.history['loss'] for fold in r['history']]
+
+        history = {'val loss' : val_loss,
+                   'train loss' : train_loss,
+                   'final loss' : final_loss}
+
+        pickle.dump(history, open(os.path.join(report_dir, 
+                    "history.pkl"), "wb"), protocol=2)
+        return final_loss
+    
+#load_spectrograms('spectrograms', n_samples=100)
+generate_spectrograms('data_16k', 'spectrograms', 66304, 16e3, augment_data=False, save_plots=True)
+#analyze_dataset('data_16k')
+#clean_dataset('data_16k', 'data_16k_rejected')
