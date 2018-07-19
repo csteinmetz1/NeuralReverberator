@@ -2,6 +2,7 @@
 __pycache__
 .vscode
 *.zip
+*.csv
 
 # project
 spectrograms/
@@ -10,5 +11,6 @@ results/
 archives/
 data/
 data_16k/
+data_16k_rejected/
 irvae_env/
 ira_env/

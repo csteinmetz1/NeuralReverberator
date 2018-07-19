@@ -3,6 +3,7 @@ import sys
 import csv
 import glob
 import librosa
+import pickle
 import shutil
 import warnings
 import subprocess
@@ -213,8 +214,6 @@ def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=102
                 power_spectra = np.abs(S)**2
                 log_power_spectra = librosa.power_to_db(power_spectra)
                 _min = np.amin(log_power_spectra)
-                print(_min)
-                print(_max)
                 _max = np.amax(log_power_spectra)
                 normalized_log_power_spectra = (log_power_spectra - _min) / (_max - _min)
                 filename = f"ir_{sample_names[idx]}_{specs_generated+1}"
@@ -232,15 +231,19 @@ def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=102
         log_power_spectra = librosa.power_to_db(power_spectra)
         _min = np.amin(log_power_spectra)
         _max = np.amax(log_power_spectra)
-        normalized_log_power_spectra = (log_power_spectra - _min) / (_max - _min)
-        filename = f"ir_{sample_names[idx]}_{specs_generated+1}"
-        np.savetxt(os.path.join(output_dir, filename + ".txt"), normalized_log_power_spectra)
-        specs_generated += 1
+        if _min == _max:
+            print(f"divide by zero in {filename}")
+        else:
+            normalized_log_power_spectra = (log_power_spectra - _min) / (_max - _min)
+            #print(np.amin(normalized_log_power_spectra), np.amax(normalized_log_power_spectra))
+            filename = f"ir_{sample_names[idx]}_{specs_generated+1}"
+            np.savetxt(os.path.join(output_dir, filename + ".txt"), normalized_log_power_spectra)
+            specs_generated += 1
 
-        if save_plots:
-            if not os.path.isdir("spect_plots"):
-                os.makedirs("spect_plots")
-            plot_spectrograms(normalized_log_power_spectra, 16000, filename + ".png", "spect_plots")
+            if save_plots:
+                if not os.path.isdir("spect_plots"):
+                    os.makedirs("spect_plots")
+                plot_spectrograms(normalized_log_power_spectra, 16000, filename + ".png", "spect_plots")
 
         sys.stdout.write(f"* Computed {specs_generated}/{n_specs} RIR spectrograms\r")
         sys.stdout.flush()
@@ -400,50 +403,102 @@ def analyze_dataset(dataset_dir,):
         c.writerow({'Metric' : 'Samples', 'Min' : min_samples, 'Max' : max_samples, 'Mean' : mean_samples})
         c.writerow({'Metric' : 'Length', 'Min' : min_length, 'Max' : max_length, 'Mean' : mean_length})  
 
+def generate_report(r, msg='', root_report_dir='reports'):
 
-def generate_report(report_dir, r, msg=''):
-    with open(os.path.join(report_dir, "report_summary.txt"), 'w') as results:
+    t = r['start_time'] # end time
+    report_dir = f"train_{t.year:04}_{t.month:02}_{t.day:02}__{t.hour:02}-{t.minute:02}"
+
+    # create report directory 
+    if not os.path.isdir(os.path.join(root_report_dir, report_dir)):
+        os.makedirs(os.path.join(root_report_dir, report_dir))
+
+    with open(os.path.join(root_report_dir, report_dir, "report.txt"), 'w') as results:
         results.write("--- RUNTIME ---\n")
-        results.write(f"Start time: {r['start time']}\n")
-        results.write(f"End time:   {r['end time']}\n")
-        results.write(f"Runtime:    {r['end time'] - r['start time']}\n\n")
+        results.write(f"Start time: {r['start_time']}\n")
+        results.write(f"End time:   {r['end_time']}\n")
+        results.write(f"Runtime:    {r['end_time'] - r['start_time']}\n\n")
         results.write("--- MESSAGE ---\n")
         results.write(f"{msg}\n\n")
         results.write("--- MSE RESULTS ---\n")
-        val_losses = []
-        for fold, track_id in zip(r["history"], r["index list"]):
-            results.write(f"* Track {track_id}\n")
-            results.write("    train   |  val\n")
-            for epoch, (train_loss, val_loss) in enumerate(zip(fold.history["loss"], 
-                                                        fold.history["val_loss"])):
-                results.write("{0}: {1:0.6f}   {2:0.6f}\n".format(epoch+1, 
-                                                train_loss, val_loss))
-            val_losses.append(val_loss)
-            results.write("\n")
-        final_loss = np.mean(val_losses)
-        results.write(f"Avg. val loss: {0:0.6f}\n".format(final_loss))
+        results.write("epochs | train   |  val\n")
+        for epoch, (train_loss, val_loss) in enumerate(zip(r['history']['loss'], r['history']['val_loss'])):
+            results.write("   {0}:   {1:0.6f}   {2:0.6f}\n".format(epoch+1, train_loss, val_loss))
         results.write("\n--- TRAINING DETAILS ---\n")
-        results.write(f"Batch size:  {r['batch size']}\n")
+        results.write(f"Batch size:  {r['batch_size']}\n")
         results.write(f"Epochs:      {r['epochs']}\n")
-        results.write(f"Input shape: {r['input shape']}\n")
-        results.write(f"Model type:  {r['model type']}\n")
-        results.write(f"Folds:       {r['folds']:d}\n")
-        results.write(f"Learning:    {r['learning rate']:f}\n")
+        results.write(f"Learning:    {r['learning_rate']}\n")
+        results.write(f"Latent dim:  {r['latent_dim']}\n")
+        results.write(f"N filters:   {r['n_filters']}\n")
+        results.write(f"Input shape: {r['input_shape']}\n")
+        results.write(f"N samples:   {r['n_samples']}\n")
         results.write("\n--- NETWORK ARCHITECTURE ---\n")
-        r["model"].summary(print_fn=lambda x: results.write(x + '\n'))
-        
-        val_loss = [fold.history['val_loss'] for fold in r['history']]
-        train_loss = [fold.history['loss'] for fold in r['history']]
-
-        history = {'val loss' : val_loss,
-                   'train loss' : train_loss,
-                   'final loss' : final_loss}
-
-        pickle.dump(history, open(os.path.join(report_dir, 
-                    "history.pkl"), "wb"), protocol=2)
-        return final_loss
+        r['autoencoder'].summary(print_fn=lambda x: results.write(x + '\n'))
+        r['encoder'].summary(print_fn=lambda x: results.write(x + '\n'))
+        r['decoder'].summary(print_fn=lambda x: results.write(x + '\n'))
     
-#load_spectrograms('spectrograms', n_samples=100)
-generate_spectrograms('data_16k', 'spectrograms', 66304, 16e3, augment_data=False, save_plots=True)
-#analyze_dataset('data_16k')
-#clean_dataset('data_16k', 'data_16k_rejected')
+    # save models
+    r['autoencoder'].save(os.path.join(root_report_dir, report_dir, "autoencoder.hdf5"))
+    r['encoder'].save(os.path.join(root_report_dir, report_dir, "encoder.hdf5"))
+    r['decoder'].save(os.path.join(root_report_dir, report_dir, "decoder.hdf5"))
+
+    # save training history for chart generation
+    pickle.dump(r['history'], open(os.path.join(root_report_dir, report_dir, 
+                                                "history.pkl"), "wb"), protocol=2)
+
+
+    generate_training_plots(r['history'], root_report_dir, report_dir, r['start_time'])
+
+def generate_training_plots(history, root_report_dir, report_dir, time, plots_dir='plots'):
+
+    if not os.path.isdir(os.path.join(root_report_dir, report_dir, plots_dir)):
+        os.makedirs(os.path.join(root_report_dir, report_dir, plots_dir))
+
+    # create training loss plot - over all epochs
+    plt.figure(1)
+    loss = history['loss']
+    val_loss = history['val_loss']
+    n_epochs = len(loss)
+
+    t = np.arange(1, n_epochs+1)
+    plt.plot(t, loss, label='train loss', linewidth=0.5, color='#d73c49')
+    plt.plot(t, val_loss, label='val loss', linewidth=0.5, color='#417e90')
+    plt.ylabel('Training Loss (MSE)')
+    plt.title(f"{time} Training Run")
+    plt.xlabel('Epoch')
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().grid(True)
+    plt.legend(loc=1, borderaxespad=0.)
+
+    plt.savefig(os.path.join(root_report_dir, report_dir, plots_dir, 
+                "train_and_val_loss_summary.png"))
+    plt.close('all')
+
+
+def check_spectrograms_for_nans(dataset_dir):
+    """
+    Utility function to determine if dataset contains samples with NaNs.
+
+    Parameters
+    ----------
+    dataset_dir : str
+        Directory containing the dataset.
+
+    Returns
+    -------
+    nans : bool
+        Boolean value indicating whether any NaNs are present. 
+    """
+    n_samples = len(glob.glob(os.path.join(dataset_dir, "*.txt")))
+    n_nans = 0
+
+    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
+        s = np.loadtxt(sample)
+
+        analysis = np.isnan(s)
+
+        if np.any(analysis):
+            n_nans += 1
+
+        sys.stdout.write(f"* Checked {idx+1}/{n_samples} RIR spectrograms | Found {n_nans} NaNs\r")
+        sys.stdout.flush()
