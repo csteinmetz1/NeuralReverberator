@@ -7,10 +7,10 @@ __pycache__
 # project
 spectrograms/
 spect_plots/
-results/
+reports/
 archives/
+latent/
 data/
 data_16k/
 data_16k_rejected/
-irvae_env/
-ira_env/
+nverb_env/
