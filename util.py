@@ -17,28 +17,20 @@ from sklearn.utils import resample
 import matplotlib as mpl 
 mpl.use('agg')
 import matplotlib.pyplot as plt
-import librosa.display
 
-def load_spectrograms(dataset_dir, train_split=0.80, n_samples=None):
+def load_specgrams(dataset_dir, train_split=0.80, n_samples=None):
     """
     Utility function to load spectogram data.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
-    train_split : float, optional
-        Fraction of the data to return as training samples.
-    n_samples : int, optional
-        Number of total dataset examples to load. 
-        (Deafults to full size of the dataset)
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+        train_split (float, optional): Fraction of the data to return as training samples.
+        n_samples (int, optional): Number of total dataset examples to load. 
+            (Deafults to full size of the dataset)
 
-    Returns
-    -------
-    x_train : ndarray
-        Training set (n_samples, n_freq_bins, n_time).
-    x_test : ndarray
-        Testing set (n_samples, n_freq_bins, n_time).
+    Returns:
+        x_train (ndarray): Training set (samples, freqs, time).
+        x_test (ndarray): Testing set (samples, freqs, time).
     """
     if n_samples is None: # set number of samples to full dataset
         n_samples = len(glob.glob(os.path.join(dataset_dir, "*.txt")))
@@ -47,14 +39,8 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=None):
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
         if idx < n_samples:
             s = np.loadtxt(sample)
-
-            if s.shape[1] < 256: # pad the input to be of shape (513, 256)
-                out = np.zeros((513, 256))
-                out[:s.shape[0],:s.shape[1]] = s
-            else: # crop the input to be of shape (513, 256)
-                out = s[:,:256]
-
-            x.append(out)
+            out = fix_specgram_shape(s, (513, 256))
+            x.append(out) # create list of spectrograms
             sys.stdout.write(f"* Loaded {idx+1}/{n_samples} RIR spectrograms\r")
             sys.stdout.flush()
 
@@ -71,27 +57,20 @@ def load_spectrograms(dataset_dir, train_split=0.80, n_samples=None):
 
     return x_train, x_test 
 
-
 def load_data(dataset_dir, split=True, train_split=0.80):
     """ 
     Utility function to load room impulse responses.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
-    train_split : float, optional
-        Fraction of the data to return as training samples.
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+        train_split (float, optional): Fraction of the data to return as training samples.
 
-    Returns
-    -------
-    x_train : ndarray
-        Training examples with shape (examples, audio samples).
-    x_test : ndarray
-        Testing examples with shape (examples, audio samples).	
+    Returns:
+        x_train (ndarray): Training examples with shape (examples, audio samples).
+        x_test (ndarray): Testing examples with shape (examples, audio samples).	
     """
     IRs = [] # list to hold audio data
-    sample_names = [] # temp list - delete this later
+    sample_names = [] # temp list - delete this later - maybe not?
     load_samples = 0
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.wav"))):
         data, rate = sf.read(sample, always_2d=True)
@@ -124,14 +103,10 @@ def convert_sample_rate(dataset_dir, output_dir, out_sample_rate):
     """ 
     Utility function convert the sample rate of audio files.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
-    output_dir : str
-        Directory to store outputs.
-    out_sample_rate : int
-        Desired output sample rate.
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+        output_dir (str): Directory to store outputs.
+        out_sample_rate (int): Desired output sample rate.
     """
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
@@ -141,7 +116,6 @@ def convert_sample_rate(dataset_dir, output_dir, out_sample_rate):
         filename = os.path.basename(sample).split('.')[0]
         out_filepath = os.path.join(output_dir, "{0}_{1}.wav".format(filename, out_sample_rate))
         subprocess.call("""sox "{0}" -r {1} "{2}" """.format(sample, out_sample_rate, out_filepath), shell=True, stderr=subprocess.DEVNULL)
-        #sf.write(os.path.join(output_dir, filename), audio, out_sample_rate, subtype='PCM_16')
 
 class GenerateIRs(keras.callbacks.Callback):
 
@@ -170,28 +144,27 @@ class GenerateIRs(keras.callbacks.Callback):
                 output_path = os.path.join(epoch_dir, "epoch{0}_x{1}_y{2}.wav".format(epoch+1, i, j))
                 sf.write(output_path, data, self.rate)
 
-def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=1024, n_hop=256, augment_data=False, save_plots=False):
+def generate_specgrams(dataset_dir, 
+                       output_dir, 
+                       sequence_len, 
+                       rate=16000, 
+                       n_fft=1024, 
+                       n_hop=256, 
+                       augment_data=False, 
+                       save_plots=False):
     """ 
     Generate spectrograms (via stft) on dataset of audio data.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
-    output_dir : str
-        Directory to store outputs.
-    sequence_len : int
-        Length of output audio data.
-    rate : int
-        Sample rate out input audio data.
-    n_fft : int, optional
-        Size of the FFT to generate spectrograms.
-    n_hop : int, optional
-        Hop size for FFT.
-    augment_data : bool, optional
-        Generate augmented (stretched and shifted) audio.
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+        output_dir (str): Directory to store outputs.
+        sequence_len (int): Length of output audio data.
+        rate (int, optional): Sample rate out input audio data.
+        n_fft (int, optional): Size of the FFT to generate spectrograms.
+        n_hop (int, optional): Hop size for FFT.
+        augment_data (bool, optional): Generate augmented (stretched and shifted) audio.
+        save_plot (bool, optional): Generate plots of spectrograms
     """
-
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
    
@@ -223,7 +196,7 @@ def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=102
                 if save_plots:
                     if not os.path.isdir("spect_plots"):
                         os.makedirs("spect_plots")
-                    plot_spectrograms(log_power_spectra, normalized_log_power_spectra, 
+                    plot_specgrams(log_power_spectra, normalized_log_power_spectra, 
                                       16000, filename + ".png", "spect_plots")
         
         S = librosa.stft(audio, n_fft=n_fft, hop_length=n_hop, center=True)
@@ -235,7 +208,6 @@ def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=102
             print(f"divide by zero in {filename}")
         else:
             normalized_log_power_spectra = (log_power_spectra - _min) / (_max - _min)
-            #print(np.amin(normalized_log_power_spectra), np.amax(normalized_log_power_spectra))
             filename = f"ir_{sample_names[idx]}_{specs_generated+1}"
             np.savetxt(os.path.join(output_dir, filename + ".txt"), normalized_log_power_spectra)
             specs_generated += 1
@@ -243,27 +215,20 @@ def generate_spectrograms(dataset_dir, output_dir, sequence_len, rate, n_fft=102
             if save_plots:
                 if not os.path.isdir("spect_plots"):
                     os.makedirs("spect_plots")
-                plot_spectrograms(normalized_log_power_spectra, 16000, filename + ".png", "spect_plots")
+                plot_specgrams(normalized_log_power_spectra, 16000, filename + ".png", "spect_plots")
 
         sys.stdout.write(f"* Computed {specs_generated}/{n_specs} RIR spectrograms\r")
         sys.stdout.flush()
 
-def plot_spectrograms(log_power_spectra, rate, filename, output_dir):
+def plot_specgrams(log_power_spectra, rate, filename, output_dir):
     """ 
     Save log-power and normalized log-power specotrgrams to file.
 
-    Parameters
-    ----------
-    log_power_spectra : ndarray
-        Comptued Log-Power spectra.
-    normalized_power_spectra : ndarray
-        Computed normalized (between 0 and 1) Log-Power spectra.
-    rate : int
-        Sample rate out input audio data.
-    filename : str
-        Output filename for generated plot.
-    output_dir : str
-        Directory to save generated plot. (must exist)
+    Args:
+        log_power_spectra (ndarray): Comptued Log-Power spectra.
+        rate (int): Sample rate of input audio data.
+        filename (str): Output filename for generated plot.
+        output_dir (str): Directory to save generated plot.
     """
 
     plt.figure()
@@ -278,16 +243,11 @@ def augment_audio(data, rate, stretch_factors=[], shift_factors=[]):
     """ 
     Perform data augmentation (stretching and pitch shifting) on input data.
 
-    Parameters
-    ----------
-    data : ndarray
-        Monophonic autio data.
-    rate : int
-        Sample rate out input audio data.
-    stretch_factors : list of floats
-        List of factors to stretch the input data by.
-    shift_factors : list of floats
-        List of factors to pitch the input data by.
+    Args:
+        data (ndarray): Monophonic autio data.
+        rate (int): Sample rate out input audio data.
+        stretch_factors (list of floats): List of factors to stretch the input data by.
+        shift_factors (list of floats): List of factors to pitch the input data by.
     """
     augmented_audio = []
 
@@ -310,18 +270,12 @@ def clean_dataset(dataset_dir, reject_dir, min_len=0.5, max_len=6.0):
     Analyze the dataset and remove samples that do not fall
     within the supplied limits.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
-    reject_dir : str
-        Directory to move rejected samples to.
-    min_len : float
-        Minimum valid length of audio in seconds.
-    max_len : float
-        Maximum valid length of audio in seconds.
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+        reject_dir (str): Directory to move rejected samples to.
+        min_len (float, optional): Minimum valid length of audio in seconds.
+        max_len (float, optional): Maximum valid length of audio in seconds.
     """    
-
     if not os.path.isdir(reject_dir):
         os.makedirs(reject_dir)
 
@@ -352,10 +306,8 @@ def analyze_dataset(dataset_dir,):
     """ 
     Analyze and calculate relevant statistics on the dataset.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
+    Args:
+        dataset_dir (str): Directory containing the dataset.
     """
     analysis = []
 
@@ -404,7 +356,30 @@ def analyze_dataset(dataset_dir,):
         c.writerow({'Metric' : 'Length', 'Min' : min_length, 'Max' : max_length, 'Mean' : mean_length})  
 
 def generate_report(r, msg='', root_report_dir='reports'):
+    """ 
+    Collect training results into a nicely formatted txt report.
 
+    Args:
+        r (dict) : Training details and results.
+
+        r = {'start_time' : start_time,
+             'end_time' : end_time,
+             'history' : history.history,
+             'batch_size' : batch_size,
+             'epochs' : epochs,
+             'learning_rate' : learning_rate,
+             'latent_dim' : latent_dim,
+             'n_filters' : n_filters,
+             'input_shape' : input_shape,
+             'rate' : rate,
+             'n_samples' : n_samples,
+             'encoder' : e,
+             'decoder' : d,
+             'autoencoder' : ae}
+
+        msg (str, optional): Optional message from user when running experiment.
+        root_report_dir (str, optional): Directory for reports to be stored.
+    """
     t = r['start_time'] # end time
     report_dir = f"train_{t.year:04}_{t.month:02}_{t.day:02}__{t.hour:02}-{t.minute:02}"
 
@@ -444,12 +419,20 @@ def generate_report(r, msg='', root_report_dir='reports'):
     # save training history for chart generation
     pickle.dump(r['history'], open(os.path.join(root_report_dir, report_dir, 
                                                 "history.pkl"), "wb"), protocol=2)
-
-
+    # save plots of the training loss curves
     generate_training_plots(r['history'], root_report_dir, report_dir, r['start_time'])
 
 def generate_training_plots(history, root_report_dir, report_dir, time, plots_dir='plots'):
+    """ 
+    Generate plots of the training and validation losses.
 
+    Args:
+        history (dict) : Training history results.
+        root_report_dir (str): Directory for reports to be stored.
+        report_dir (str): Directory for the current report to be stored.
+        time (str): Start time of the training cycle.
+        plots_dir (str, optional): Subdirectory to store plots. 
+    """
     if not os.path.isdir(os.path.join(root_report_dir, report_dir, plots_dir)):
         os.makedirs(os.path.join(root_report_dir, report_dir, plots_dir))
 
@@ -474,20 +457,14 @@ def generate_training_plots(history, root_report_dir, report_dir, time, plots_di
                 "train_and_val_loss_summary.png"))
     plt.close('all')
 
-
 def check_spectrograms_for_nans(dataset_dir):
     """
     Utility function to determine if dataset contains samples with NaNs.
 
-    Parameters
-    ----------
-    dataset_dir : str
-        Directory containing the dataset.
-
-    Returns
-    -------
-    nans : bool
-        Boolean value indicating whether any NaNs are present. 
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+    Returns:
+        nans (bool): Boolean value indicating if NaNs are present. 
     """
     n_samples = len(glob.glob(os.path.join(dataset_dir, "*.txt")))
     n_nans = 0
@@ -502,3 +479,107 @@ def check_spectrograms_for_nans(dataset_dir):
 
         sys.stdout.write(f"* Checked {idx+1}/{n_samples} RIR spectrograms | Found {n_nans} NaNs\r")
         sys.stdout.flush()
+
+def fix_specgram_shape(spec, shape):
+    """Fix spectrogram shape to user specified size.
+    Args:
+        spec: 2D spectrogram [freqs, time].
+        shape: 2D output spectrogram shape [freqs, time].
+    Returns:
+        fixed_spec: fixed 2D output spectrogram [freqs, time].
+    """
+    if spec.shape[1] < shape[1]: # pad the input to be of shape (513, 256)
+        out = np.zeros(shape)
+        out[:s.shape[0],:spec.shape[1]] = s
+    else: # crop the input to be of shape (513, 256)
+        out = s[:,:shape[1]]
+            
+    return spec
+
+#---------------------------------------------------------------------------------
+# The methods below come from the nsynth magenta project found here:
+# https://github.com/tensorflow/magenta/tree/master/magenta/models/nsynth
+
+def inv_magphase(mag, phase_angle):
+    phase = np.cos(phase_angle) + 1.j * np.sin(phase_angle)
+    return mag * phase
+
+def griffin_lim(mag, phase_angle, n_fft, hop, num_iters):
+    """Iterative algorithm for phase retrival from a magnitude spectrogram.
+    Args:
+        mag: Magnitude spectrogram.
+        phase_angle: Initial condition for phase.
+        n_fft: Size of the FFT.
+        hop: Stride of FFT. Defaults to n_fft/2.
+        num_iters: Griffin-Lim iterations to perform.
+    Returns:
+        audio: 1-D array of float32 sound samples.
+    """
+    fft_config = dict(n_fft=n_fft, win_length=n_fft, hop_length=hop, center=True)
+    ifft_config = dict(win_length=n_fft, hop_length=hop, center=True)
+    complex_specgram = inv_magphase(mag, phase_angle)
+    for i in range(num_iters):
+        audio = librosa.istft(complex_specgram, **ifft_config)
+        if i != num_iters - 1:
+            complex_specgram = librosa.stft(audio, **fft_config)
+            _, phase = librosa.magphase(complex_specgram)
+            phase_angle = np.angle(phase)
+            complex_specgram = inv_magphase(mag, phase_angle)
+    return audio
+
+def ispecgram(spec,
+              n_fft=512,
+              hop_length=None,
+              mask=True,
+              log_mag=True,
+              re_im=False,
+              dphase=True,
+              mag_only=True,
+              num_iters=1000):
+    """Inverse Spectrogram using librosa.
+    Args:
+        spec: 3-D specgram array [freqs, time, (mag_db, dphase)].
+        n_fft: Size of the FFT.
+        hop_length: Stride of FFT. Defaults to n_fft/2.
+        mask: Reverse the mask of the phase derivative by the magnitude.
+        log_mag: Use the logamplitude.
+        re_im: Output Real and Imag. instead of logMag and dPhase.
+        dphase: Use derivative of phase instead of phase.
+        mag_only: Specgram contains no phase.
+        num_iters: Number of griffin-lim iterations for mag_only.
+    Returns:
+        audio: 1-D array of sound samples. Peak normalized to 1.
+    """
+    if not hop_length:
+        hop_length = n_fft // 2
+
+    ifft_config = dict(win_length=n_fft, hop_length=hop_length, center=True)
+
+    if mag_only:
+        mag = spec[:, :, 0]
+        phase_angle = np.pi * np.random.rand(*mag.shape)
+    elif re_im:
+        spec_real = spec[:, :, 0] + 1.j * spec[:, :, 1]
+    else:
+        mag, p = spec[:, :, 0], spec[:, :, 1]
+        if mask and log_mag:
+            p /= (mag + 1e-13 * np.random.randn(*mag.shape))
+        if dphase:
+            # Roll up phase
+            phase_angle = np.cumsum(p * np.pi, axis=1)
+        else:
+            phase_angle = p * np.pi
+
+    # Magnitudes
+    if log_mag:
+        mag = (mag - 1.0) * 120.0
+        mag = 10**(mag / 20.0)
+    phase = np.cos(phase_angle) + 1.j * np.sin(phase_angle)
+    spec_real = mag * phase
+
+    if mag_only:
+        audio = griffin_lim(
+            mag, phase_angle, n_fft, hop_length, num_iters=num_iters)
+    else:
+        audio = librosa.core.istft(spec_real, **ifft_config)
+    return np.squeeze(audio / audio.max())
