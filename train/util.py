@@ -631,4 +631,4 @@ def ispecgram(spec,
             mag, phase_angle, n_fft, hop_length, num_iters=num_iters)
     else:
         audio = librosa.core.istft(spec_real, **ifft_config)
-    return np.squeeze(audio / audio.max())
+    return np.squeeze((audio / audio.max()) * 0.25) # scale to -12dB peak
