@@ -3,6 +3,7 @@ __pycache__
 .vscode
 *.zip
 *.csv
+*.vst
 
 # project
 spectrograms/
@@ -14,3 +15,6 @@ data/
 data_16k/
 data_16k_rejected/
 nverb_env/
+
+# MATLAB
+audioplugin/
