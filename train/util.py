@@ -41,7 +41,6 @@ def load_specgrams(dataset_dir, spec_shape, train_split=0.80, n_samples=None):
         if idx < n_samples:
             s = np.loadtxt(sample)
             out = fix_specgram_shape(s, spec_shape)
-            print(out.shape)
             x.append(out) # create list of spectrograms
             sys.stdout.write(f"* Loaded {idx+1}/{n_samples} RIR spectrograms\r")
             sys.stdout.flush()
@@ -529,9 +528,11 @@ def generate_training_plots(history, root_report_dir, report_dir, time, plots_di
     plt.close('all')
 
     # Last 10% epochs summary
-    t = np.arange(n_epochs-0.9*n_epochs, n_epochs+1)
-    plt.plot(t, loss, label='train loss', linewidth=0.5, color='#d73c49')
-    plt.plot(t, val_loss, label='val loss', linewidth=0.5, color='#417e90')
+    start = int(0.9*n_epochs)
+    end = n_epochs
+    t = np.arange(start, end)
+    plt.plot(t, loss[start:end], label='train loss', linewidth=0.5, color='#d73c49')
+    plt.plot(t, val_loss[start:end], label='val loss', linewidth=0.5, color='#417e90')
     plt.ylabel('Training Loss (MSE)')
     plt.title(f"{time} Training Run")
     plt.xlabel('Epoch')
