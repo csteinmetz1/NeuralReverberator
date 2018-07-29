@@ -1,14 +1,13 @@
-classdef NeuralReverberator < audioPlugin & matlab.System & ...
-        matlab.system.mixin.Propagates
+classdef NeuralReverberator < audioPlugin & matlab.System
     %----------------------------------------------------------------------
     % Public properties
     %----------------------------------------------------------------------
     properties(Nontunable)
-        nverb = load('/Volumes/HDMETZ1/Datasets/nverb/pre_compute/nverb.mat')
-        ImpulseResponseFs = 16000;
-        ImpulseResponseLength = 65280;
+        nverb = load('nverb.mat')
+        RIRFs = 16000;
+        RIRLength = 65280;
         PartitionSize = 1024;
-    end    
+    end     
     
     properties
         InputGain = -12;
@@ -23,8 +22,8 @@ classdef NeuralReverberator < audioPlugin & matlab.System & ...
     
     properties (Constant)
         PluginInterface = audioPluginInterface(...
-            'InputChannels',1,...
-            'OutputChannels',1,...
+            'InputChannels',2,...
+            'OutputChannels',2,...
             'PluginName','NeuralReverberator',...
             audioPluginParameter('InputGain','DisplayName', 'Input Gain','Label', 'dB','Mapping', {'pow', 1/3, -140, 12}),...
             audioPluginParameter('HF_cut','DisplayName','HF Cut','Label','Hz','Mapping',{'log',5000.0,20000.0}),...
@@ -39,7 +38,8 @@ classdef NeuralReverberator < audioPlugin & matlab.System & ...
     % Private properties
     %----------------------------------------------------------------------
     properties(Access = private)
-        pFIR
+        pFIRLeft;
+        pFIRRight;
         pFractionalDelay
     end
     %----------------------------------------------------------------------
@@ -48,25 +48,45 @@ classdef NeuralReverberator < audioPlugin & matlab.System & ...
     methods(Access = protected)
         function y = stepImpl(plugin,u)
             
-            ir_index = (plugin.a * 100 + plugin.b * 10 + plugin.c) + 1;
-            ir_audio = transpose(plugin.nverb.ir_audio(:,ir_index));
-            plugin.pFIR.Numerator = ir_audio;
+            % Initialize reverb
+            [RIRAudioLeft, RIRAudioRight] = plugin.getRIR();
+            
+            % Upsample to match input
+            upsampledRIRAudioLeft = plugin.upsampleRIR(RIRAudioLeft);
+            upsampledRIRAudioRight = plugin.upsampleRIR(RIRAudioRight);
+            
+            % Update FIR filter
+            plugin.pFIRLeft.Numerator = upsampledRIRAudioLeft;
+            plugin.pFIRRight.Numerator = upsampledRIRAudioRight;
             
             u = 10.^(plugin.InputGain/20)*u;
-            wet = step(plugin.pFIR, u);
-            dly_samples = (plugin.Pre_delay/1000) * getSampleRate(plugin);
-            dly_wet = plugin.pFractionalDelay(wet, dly_samples);
-            y = ((1-plugin.Mix) * u) + (plugin.Mix * dly_wet);
+            
+            wetLeft = step(plugin.pFIRLeft, u(:,1));
+            wetRight = step(plugin.pFIRRight, u(:,2));
+            
+            delaySamples = (plugin.Pre_delay/1000) * getSampleRate(plugin);
+            wetLeftDelayed = plugin.pFractionalDelay(wetLeft, delaySamples);
+            wetRightDelayed = plugin.pFractionalDelay(wetRight, delaySamples);
+            
+            wetStereoDelayed = [wetLeftDelayed, wetRightDelayed];
+            
+            y = ((1-plugin.Mix) * u) + (plugin.Mix * wetStereoDelayed);
         end
 
         function setupImpl(plugin, u)
             
-            % initialize reverb
-            ir_index = (plugin.a * 100 + plugin.b * 10 + plugin.c) + 1;
-            ir_audio = transpose(plugin.nverb.ir_audio(:,ir_index));
+            % Initialize reverb
+            [RIRAudioLeft, RIRAudioRight] = plugin.getRIR();
+                        
+            % Upsample to match input
+            upsampledRIRAudioLeft = plugin.upsampleRIR(RIRAudioLeft);
+            upsampledRIRAudioRight = plugin.upsampleRIR(RIRAudioRight);
             
-            % Create frequency domain filter for convolution 
-            plugin.pFIR = dsp.FrequencyDomainFIRFilter('Numerator', ir_audio,...
+            % Create frequency domain filters for convolution 
+            plugin.pFIRLeft = dsp.FrequencyDomainFIRFilter('Numerator', upsampledRIRAudioLeft,...
+                'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
+
+            plugin.pFIRRight = dsp.FrequencyDomainFIRFilter('Numerator', upsampledRIRAudioRight,...
                 'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
             
             % Create fractional delay
@@ -75,28 +95,20 @@ classdef NeuralReverberator < audioPlugin & matlab.System & ...
         end
 
         function resetImpl(plugin)
-            reset(plugin.pFIR);
+            reset(plugin.pFIRLeft);
+            reset(plugin.pFIRRight);
         end
-        %------------------------------------------------------------------
-        % Propagators
-        function varargout = isOutputComplexImpl(~)
-            varargout{1} = false;
-        end
-        
-        function varargout = getOutputSizeImpl(obj)
-            varargout{1} = propagatedInputSize(obj, 1);
-        end
-        
-        function varargout = getOutputDataTypeImpl(obj)
-            varargout{1} = propagatedInputDataType(obj, 1);
-        end
-        
-        function varargout = isOutputFixedSizeImpl(obj)
-            varargout{1} = propagatedInputFixedSize(obj,1);
-        end
-    end  
-    
+    end
     methods 
+        function [RIRAudioLeft, RIRAudioRight] = getRIR(plugin)
+            RIRIndex = (plugin.a * 100 + plugin.b * 10 + plugin.c) + 1;
+            RIRAudioLeft = transpose(plugin.nverb.ir_audio(:,RIRIndex));
+            RIRAudioRight = transpose(plugin.nverb.ir_audio(:,RIRIndex+1));
+        end
+        function upsampledRIRAudio = upsampleRIR(plugin, RIRAudio)
+            upsampleFactor = floor(getSampleRate(plugin) / plugin.RIRFs);
+            upsampledRIRAudio = upsample(RIRAudio, upsampleFactor);
+        end
         function set.a(plugin, val)
             plugin.a = val;
         end
