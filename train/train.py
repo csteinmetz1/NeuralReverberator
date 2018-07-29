@@ -1,9 +1,9 @@
 import datetime
-from util import load_spectrograms, generate_report
-from model import build_spectral_ae
+import util
+import model
 
 # hyperparameters
-epochs = 2
+epochs = 10
 batch_size = 8
 learning_rate = 0.0001
 latent_dim = 3
@@ -11,17 +11,17 @@ n_filters = [32, 64, 128, 1024]
 n_samples = 10
 
 # input
-input_shape = (513, 256, 1)
+input_shape = (513, 128, 1)
 rate = 16000
 
 # build the model
-e, d, ae = build_spectral_ae(input_shape=input_shape, 
-                            latent_dim=latent_dim,
-                            n_filters=n_filters,
-                            lr=learning_rate)
+e, d, ae = model.build_spectral_ae(input_shape=input_shape, 
+                                   latent_dim=latent_dim,
+                                   n_filters=n_filters,
+                                   lr=learning_rate)
 
 # load the data
-x_train, x_test = load_spectrograms('spectrograms', n_samples=n_samples)
+x_train, x_test = util.load_specgrams('spectrograms', (513, 128), train_split=0.95, n_samples=n_samples)
 
 start_time = datetime.datetime.today()
 
@@ -52,4 +52,4 @@ r = {'start_time' : start_time,
      'decoder' : d,
      'autoencoder' : ae}
 
-generate_report(r)
+util.generate_report(r)

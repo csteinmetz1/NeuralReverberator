@@ -18,12 +18,13 @@ import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
 
-def load_specgrams(dataset_dir, train_split=0.80, n_samples=None):
+def load_specgrams(dataset_dir, spec_shape, train_split=0.80, n_samples=None):
     """
     Utility function to load spectogram data.
 
     Args:
         dataset_dir (str): Directory containing the dataset.
+        spec_shape (tuple) : Shape of spectrograms to be loaded (freqs, time)
         train_split (float, optional): Fraction of the data to return as training samples.
         n_samples (int, optional): Number of total dataset examples to load. 
             (Deafults to full size of the dataset)
@@ -39,7 +40,8 @@ def load_specgrams(dataset_dir, train_split=0.80, n_samples=None):
     for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
         if idx < n_samples:
             s = np.loadtxt(sample)
-            out = fix_specgram_shape(s, (513, 256))
+            out = fix_specgram_shape(s, spec_shape)
+            print(out.shape)
             x.append(out) # create list of spectrograms
             sys.stdout.write(f"* Loaded {idx+1}/{n_samples} RIR spectrograms\r")
             sys.stdout.flush()
@@ -302,6 +304,49 @@ def clean_dataset(dataset_dir, reject_dir, min_len=0.5, max_len=6.0):
     print("* Analyzed {0:4} RIRs | {1:4} accepted | {2:4} rejected\r".format(idx+1, idx+1-n_rejected, n_rejected))
     print("Cleaning complete.")
 
+def check_spectrograms_for_nans(dataset_dir):
+    """
+    Utility function to determine if dataset contains samples with NaNs.
+
+    Args:
+        dataset_dir (str): Directory containing the dataset.
+    Returns:
+        nans (bool): Boolean value indicating if NaNs are present. 
+    """
+    n_samples = len(glob.glob(os.path.join(dataset_dir, "*.txt")))
+    n_nans = 0
+
+    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
+        s = np.loadtxt(sample)
+
+        analysis = np.isnan(s)
+
+        if np.any(analysis):
+            n_nans += 1
+
+        sys.stdout.write(f"* Checked {idx+1}/{n_samples} RIR spectrograms | Found {n_nans} NaNs\r")
+        sys.stdout.flush()
+
+def fix_specgram_shape(spec, shape):
+    """Fix spectrogram shape to user specified size.
+    Args:
+        spec: 2D spectrogram [freqs, time].
+        shape: 2D output spectrogram shape [freqs, time].
+    Returns:
+        fixed_spec: fixed 2D output spectrogram [freqs, time].
+    """
+    if spec.shape[1] < shape[1]: # pad the input to be of shape (513, 256)
+        out = np.zeros(shape)
+        out[:spec.shape[0],:spec.shape[1]] = spec
+    else: # crop the input to be of shape (513, 256)
+        out = spec[:,:shape[1]]
+            
+    return out
+
+#---------------------------------------------------------------------------------
+# Analysis, plotting, and report generation
+#---------------------------------------------------------------------------------
+
 def analyze_dataset(dataset_dir,):
     """ 
     Analyze and calculate relevant statistics on the dataset.
@@ -442,6 +487,7 @@ def generate_training_plots(history, root_report_dir, report_dir, time, plots_di
     val_loss = history['val_loss']
     n_epochs = len(loss)
 
+    # Summary plot (train and val)
     t = np.arange(1, n_epochs+1)
     plt.plot(t, loss, label='train loss', linewidth=0.5, color='#d73c49')
     plt.plot(t, val_loss, label='val loss', linewidth=0.5, color='#417e90')
@@ -452,53 +498,55 @@ def generate_training_plots(history, root_report_dir, report_dir, time, plots_di
     plt.gca().spines['right'].set_visible(False)
     plt.gca().grid(True)
     plt.legend(loc=1, borderaxespad=0.)
-
     plt.savefig(os.path.join(root_report_dir, report_dir, plots_dir, 
                 "train_and_val_loss_summary.png"))
     plt.close('all')
 
-def check_spectrograms_for_nans(dataset_dir):
-    """
-    Utility function to determine if dataset contains samples with NaNs.
+    # Train plot
+    t = np.arange(1, n_epochs+1)
+    plt.plot(t, loss, label='train loss', linewidth=0.5, color='#d73c49')
+    plt.ylabel('Training Loss (MSE)')
+    plt.title(f"{time} Training Run")
+    plt.xlabel('Epoch')
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().grid(True)
+    plt.savefig(os.path.join(root_report_dir, report_dir, plots_dir, 
+                "train.png"))
+    plt.close('all')
 
-    Args:
-        dataset_dir (str): Directory containing the dataset.
-    Returns:
-        nans (bool): Boolean value indicating if NaNs are present. 
-    """
-    n_samples = len(glob.glob(os.path.join(dataset_dir, "*.txt")))
-    n_nans = 0
+    # Val plot
+    t = np.arange(1, n_epochs+1)
+    plt.plot(t, val_loss, label='val loss', linewidth=0.5, color='#417e90')
+    plt.ylabel('Validation Loss (MSE)')
+    plt.title(f"{time} Training Run")
+    plt.xlabel('Epoch')
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().grid(True)
+    plt.savefig(os.path.join(root_report_dir, report_dir, plots_dir, 
+                "val.png"))
+    plt.close('all')
 
-    for idx, sample in enumerate(glob.glob(os.path.join(dataset_dir, "*.txt"))):
-        s = np.loadtxt(sample)
-
-        analysis = np.isnan(s)
-
-        if np.any(analysis):
-            n_nans += 1
-
-        sys.stdout.write(f"* Checked {idx+1}/{n_samples} RIR spectrograms | Found {n_nans} NaNs\r")
-        sys.stdout.flush()
-
-def fix_specgram_shape(spec, shape):
-    """Fix spectrogram shape to user specified size.
-    Args:
-        spec: 2D spectrogram [freqs, time].
-        shape: 2D output spectrogram shape [freqs, time].
-    Returns:
-        fixed_spec: fixed 2D output spectrogram [freqs, time].
-    """
-    if spec.shape[1] < shape[1]: # pad the input to be of shape (513, 256)
-        out = np.zeros(shape)
-        out[:s.shape[0],:spec.shape[1]] = s
-    else: # crop the input to be of shape (513, 256)
-        out = s[:,:shape[1]]
-            
-    return spec
+    # Last 10% epochs summary
+    t = np.arange(n_epochs-0.9*n_epochs, n_epochs+1)
+    plt.plot(t, loss, label='train loss', linewidth=0.5, color='#d73c49')
+    plt.plot(t, val_loss, label='val loss', linewidth=0.5, color='#417e90')
+    plt.ylabel('Training Loss (MSE)')
+    plt.title(f"{time} Training Run")
+    plt.xlabel('Epoch')
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().grid(True)
+    plt.legend(loc=1, borderaxespad=0.)
+    plt.savefig(os.path.join(root_report_dir, report_dir, plots_dir, 
+                "train_and_val_loss_summary_end.png"))
+    plt.close('all')
 
 #---------------------------------------------------------------------------------
 # The methods below come from the nsynth magenta project found here:
 # https://github.com/tensorflow/magenta/tree/master/magenta/models/nsynth
+#---------------------------------------------------------------------------------
 
 def inv_magphase(mag, phase_angle):
     phase = np.cos(phase_angle) + 1.j * np.sin(phase_angle)
