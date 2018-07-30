@@ -11,8 +11,8 @@ classdef NeuralReverberator < audioPlugin & matlab.System
     
     properties
         InputGain = -6;
-        HFCut = 20000.0;
-        LFCut = 1.0;
+        Lowpass = 20000.0;
+        Highpass = 20.0;
         PreDelay = 0.0;
         a = 0;
         b = 0;
@@ -26,9 +26,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             'OutputChannels',2,...
             'PluginName','NeuralReverberator',...
             audioPluginParameter('InputGain','DisplayName', 'Input Gain','Label', 'dB','Mapping', {'pow', 1/3, -140, 12}),...
-            audioPluginParameter('HFCut','DisplayName','HF Cut','Label','Hz','Mapping',{'log',500.0,20000.0}),...
-            audioPluginParameter('LFCut','DisplayName','LF Cut','Label','Hz','Mapping',{'log',1.0,5000.0}),...
-            audioPluginParameter('PreDelay','DisplayName','Pre-Delay','Label','ms','Mapping',{'lin',0.0,300.0}),...
+            audioPluginParameter('Lowpass','DisplayName','Lowpass','Label','Hz','Mapping',{'log',500.0,20000.0}),...
+            audioPluginParameter('Highpass','DisplayName','Highpass','Label','Hz','Mapping',{'log',20.0,5000.0}),...
+            audioPluginParameter('PreDelay','DisplayName','Pre-Delay','Label','ms','Mapping',{'lin',-50.0,300.0}),...
             audioPluginParameter('a','DisplayName','A','Mapping',{'int',0,9}),...
             audioPluginParameter('b','DisplayName','B','Mapping',{'int',0,9}),...
             audioPluginParameter('c','DisplayName','C','Mapping',{'int',0,9}),...
@@ -69,20 +69,20 @@ classdef NeuralReverberator < audioPlugin & matlab.System
                 upsampledRIRAudioRight = upsampleRIR(plugin, RIRAudioRight);
 
                 % Update FIR filter
-                plugin.pFIRLeft.Numerator = upsampledRIRAudioLeft;
-                plugin.pFIRRight.Numerator = upsampledRIRAudioRight;
+                plugin.pFIRLeft.Numerator = RIRAudioLeft;
+                plugin.pFIRRight.Numerator = RIRAudioRight;
                 setUpdateRIRAudio(plugin,false)
             end
             
             if plugin.UpdateHPF
                 % Update HPF coefficients
-                [plugin.HPFNum, plugin.HPFDen] = butter(2, plugin.LFCut/(getSampleRate(plugin)/2), 'high');
+                [plugin.HPFNum, plugin.HPFDen] = calculateHPFCoefficients(plugin);
                 setUpdateHPF(plugin,false)
             end
             
-            if plugin.UpdateLPF
+            if plugin.UpdateLPF              
                 % Update LPF coefficients
-                [plugin.LPFNum, plugin.LPFDen] = butter(2, plugin.HFCut/(getSampleRate(plugin)/2), 'low');
+                [plugin.LPFNum, plugin.LPFDen] = calculateLPFCoefficients(plugin);
                 setUpdateLPF(plugin,false)
             end
             
@@ -102,10 +102,17 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             
             % Perform Pre-delay
             delaySamples = (plugin.PreDelay/1000) * getSampleRate(plugin);
-            wetDelayed = plugin.pFractionalDelay(wet, delaySamples);
-                        
+            if plugin.PreDelay > 0.0
+                wet = plugin.pFracDelay(wet, delaySamples);
+                dry = u;
+            elseif plugin.PreDelay < 0.0
+                dry = plugin.pFracDelay(u, -delaySamples);
+            else
+                dry = u;
+            end
+     
             % Mix the dry and wet signals together
-            y = ((1-plugin.Mix) * u) + (plugin.Mix * wetDelayed);
+            y = ((1-plugin.Mix) * dry) + (plugin.Mix * wet);
         end
 
         function setupImpl(plugin, u)
@@ -113,19 +120,19 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             % Initialize reverb
             [RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin);
                         
-            % Upsample to match input
+            % Upsample to match input - not sure how to handle this yet
             upsampledRIRAudioLeft = upsampleRIR(plugin, RIRAudioLeft);
             upsampledRIRAudioRight = upsampleRIR(plugin, RIRAudioRight);
-            
+
             % Initialize HPF and LPF filters
-            [plugin.HPFNum, plugin.HPFDen] = butter(2, plugin.LFCut/(getSampleRate(plugin)/2), 'high');
-            [plugin.LPFNum, plugin.LPFDen] = butter(2, plugin.HFCut/(getSampleRate(plugin)/2), 'low');
+            [plugin.HPFNum, plugin.HPFDen] = calculateHPFCoefficients(plugin);
+            [plugin.LPFNum, plugin.LPFDen] = calculateLPFCoefficients(plugin);
             
             % Create frequency domain filters for convolution 
-            plugin.pFIRLeft = dsp.FrequencyDomainFIRFilter('Numerator', upsampledRIRAudioLeft,...
+            plugin.pFIRLeft = dsp.FrequencyDomainFIRFilter('Numerator', RIRAudioLeft,...
                 'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
 
-            plugin.pFIRRight = dsp.FrequencyDomainFIRFilter('Numerator', upsampledRIRAudioRight,...
+            plugin.pFIRRight = dsp.FrequencyDomainFIRFilter('Numerator', RIRAudioRight,...
                 'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
             
             % Create fractional delay
@@ -161,22 +168,50 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             upsampleFactor = floor(getSampleRate(plugin) / plugin.RIRFs);
             upsampledRIRAudio = upsample(RIRAudio, upsampleFactor);
         end
+        function [b, a] = calculateLPFCoefficients(plugin)
+            w0 = 2 * pi * (plugin.Lowpass/getSampleRate(plugin));
+            alpha = sin(w0) / (sqrt(2));
+            
+            b0 = (1 - cos(w0))/2;
+            b1 = (1 - cos(w0));
+            b2 = (1 - cos(w0))/2;
+            a0 =  1 + alpha;
+            a1 = -2 * cos(w0);
+            a2 =  1 - alpha;
+            
+            b = [b0, b1, b2];
+            a = [a0, a1, a2];
+        end
+        function [b, a] = calculateHPFCoefficients(plugin)
+            w0 = 2 * pi * (plugin.Highpass/getSampleRate(plugin));
+            alpha = sin(w0) / (2 * sqrt(2)/2);
+           
+            b0 =  (1 + cos(w0))/2;
+            b1 = -(1 + cos(w0));
+            b2 =  (1 + cos(w0))/2;
+            a0 =   1 + alpha;
+            a1 =  -2 * cos(w0);
+            a2 =   1 - alpha;
+            
+            b = [b0, b1, b2];
+            a = [a0, a1, a2];
+        end
     end
     
     methods 
-        function set.HFCut(plugin, val)
-            plugin.HFCut = val;
+        function set.Lowpass(plugin, val)
+            plugin.Lowpass = val;
             setUpdateLPF(plugin, true);
         end
-        function val = get.HFCut(plugin)
-            val = plugin.HFCut;
+        function val = get.Lowpass(plugin)
+            val = plugin.Lowpass;
         end
-        function set.LFCut(plugin, val)
-            plugin.LFCut = val;
+        function set.Highpass(plugin, val)
+            plugin.Highpass = val;
             setUpdateHPF(plugin, true);
         end
-        function val = get.LFCut(plugin)
-            val = plugin.LFCut;
+        function val = get.Highpass(plugin)
+            val = plugin.Highpass;
         end
         function set.a(plugin, val)
             plugin.a = val;
