@@ -102,7 +102,7 @@ if __name__ == '__main__':
                 print("{:04d} | z = [ {:+0.3f} {:+0.3f} {:+0.3f} ]".format(idx, a, b, c))
                 z = np.reshape(np.array([a, b, c]), (1, 1, 1, 3)) # think i want to fix this in my model
                 filename = "_".join(["({:+0.3f})".format(dim) for dim in np.reshape(z, (3))])
-                filename = "{:03d}_{}".format(idx, filename)
+                filename = "{:04d}_{}".format(idx, filename)
                 filepath = os.path.join('pre_compute2', filename)
                 spec = generate_specgram(decoder, z)
                 audio_from_specgram(spec, 16000, filepath)
@@ -115,7 +115,7 @@ if __name__ == '__main__':
                 print("{:04d} | z = [ {:+0.3f} {:+0.3f} {:+0.3f} ]".format(idx, z[0], z[1], z[2]))
                 z = np.reshape(z, (1, 1, 1, 3)) # think i want to fix this in my model
                 filename = "_".join(["({:+0.3f})".format(dim) for dim in np.reshape(z, (3))])
-                filename = "{:03d}_{}".format(idx, filename)
+                filename = "{:04d}_{}".format(idx, filename)
                 filepath = os.path.join('pre_compute2', filename)
                 spec = generate_specgram(decoder, z)
                 audio_from_specgram(spec, 16000, filepath)
