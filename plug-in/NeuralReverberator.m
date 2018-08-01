@@ -3,9 +3,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
     % Public properties
     %----------------------------------------------------------------------
     properties(Nontunable)
-        nverb = load('nverb.mat')
-        RIRFs = 16000;
-        RIRLength = 65280;
+        nverb = load('nverb_stereo.mat')
+        nverbFs = 16000;
+        nverbLength = 65280;
         PartitionSize = 1024;
     end     
     
@@ -14,9 +14,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         Lowpass = 20000.0;
         Highpass = 20.0;
         PreDelay = 0.0;
-        a = 0;
-        b = 0;
-        c = 0;
+        a = 1;
+        b = 1;
+        c = 1;
         Mix = 1.0;
     end
     
@@ -29,9 +29,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             audioPluginParameter('Lowpass','DisplayName','Lowpass','Label','Hz','Mapping',{'log',500.0,20000.0}),...
             audioPluginParameter('Highpass','DisplayName','Highpass','Label','Hz','Mapping',{'log',20.0,5000.0}),...
             audioPluginParameter('PreDelay','DisplayName','Pre-Delay','Label','ms','Mapping',{'lin',-50.0,300.0}),...
-            audioPluginParameter('a','DisplayName','A','Mapping',{'int',0,9}),...
-            audioPluginParameter('b','DisplayName','B','Mapping',{'int',0,9}),...
-            audioPluginParameter('c','DisplayName','C','Mapping',{'int',0,9}),...
+            audioPluginParameter('a','DisplayName','A','Mapping',{'int',1,10}),...
+            audioPluginParameter('b','DisplayName','B','Mapping',{'int',1,10}),...
+            audioPluginParameter('c','DisplayName','C','Mapping',{'int',1,10}),...
             audioPluginParameter('Mix','DisplayName','Mix','Label','%','Mapping',{'lin',0,1.0}));
     end
     %----------------------------------------------------------------------
@@ -50,6 +50,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         UpdateLPF = false;
         UpdateRIRAudio = false;
         
+        pFIRRateConverter
         pFIRLeft
         pFIRRight
         pFracDelay
@@ -64,9 +65,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
                 % Get proper RIRs for given parameters
                 [RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin);
 
-                % Upsample to match input
-                upsampledRIRAudioLeft = upsampleRIR(plugin, RIRAudioLeft);
-                upsampledRIRAudioRight = upsampleRIR(plugin, RIRAudioRight);
+                % Upsample to match input - not sure how to handle this yet
+                %resampledRIRAudioLeft = resampleRIR(plugin, RIRAudioLeft);
+                %resampledRIRAudioRight = resampleRIR(plugin, RIRAudioRight);
 
                 % Update FIR filter
                 plugin.pFIRLeft.Numerator = RIRAudioLeft;
@@ -102,17 +103,10 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             
             % Perform Pre-delay
             delaySamples = (plugin.PreDelay/1000) * getSampleRate(plugin);
-            if plugin.PreDelay > 0.0
-                wet = plugin.pFracDelay(wet, delaySamples);
-                dry = u;
-            elseif plugin.PreDelay < 0.0
-                dry = plugin.pFracDelay(u, -delaySamples);
-            else
-                dry = u;
-            end
+            wet = plugin.pFracDelay(wet, delaySamples);
      
             % Mix the dry and wet signals together
-            y = ((1-plugin.Mix) * dry) + (plugin.Mix * wet);
+            y = ((1-plugin.Mix) * u) + (plugin.Mix * wet);
         end
 
         function setupImpl(plugin, u)
@@ -121,8 +115,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             [RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin);
                         
             % Upsample to match input - not sure how to handle this yet
-            upsampledRIRAudioLeft = upsampleRIR(plugin, RIRAudioLeft);
-            upsampledRIRAudioRight = upsampleRIR(plugin, RIRAudioRight);
+            %plugin.pFIRRateConverter = 
+            %resampledRIRAudioLeft = resampleRIR(plugin, RIRAudioLeft);
+            %resampledRIRAudioRight = resampleRIR(plugin, RIRAudioRight);
 
             % Initialize HPF and LPF filters
             [plugin.HPFNum, plugin.HPFDen] = calculateHPFCoefficients(plugin);
@@ -141,8 +136,25 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         end
 
         function resetImpl(plugin)
+            
+            % Release since numerator size changes on sample rate change
             reset(plugin.pFIRLeft);
             reset(plugin.pFIRRight);
+            
+            % Initialize reverb
+            %[RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin);
+                        
+            % Upsample to match input - not sure how to handle this yet
+            %resampledRIRAudioLeft = resampleRIR(plugin, RIRAudioLeft);
+            %resampledRIRAudioRight = resampleRIR(plugin, RIRAudioRight);
+            
+            % Re-init frequency domain filters for convolution 
+            %plugin.pFIRLeft = dsp.FrequencyDomainFIRFilter('Numerator', RIRAudioLeft,...
+            %    'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
+
+            %plugin.pFIRRight = dsp.FrequencyDomainFIRFilter('Numerator', RIRAudioRight,...
+            %    'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
+            
             reset(plugin.pFracDelay);
             plugin.HPFState = zeros(2);
             plugin.LPFState = zeros(2);
@@ -160,13 +172,13 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             plugin.UpdateRIRAudio = flag;
         end
         function [RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin)
-            RIRIndex = (plugin.a * 100 + plugin.b * 10 + plugin.c) + 1;
-            RIRAudioLeft = transpose(plugin.nverb.ir_audio(:,RIRIndex));
-            RIRAudioRight = transpose(plugin.nverb.ir_audio(:,RIRIndex+1));
+            RIRIndex = (plugin.a * 200 + plugin.b * 20 + plugin.c * 2);
+            RIRAudioLeft = transpose(plugin.nverb.RIRAudio(:,RIRIndex));
+            RIRAudioRight = transpose(plugin.nverb.RIRAudio(:,RIRIndex+1));
         end
-        function upsampledRIRAudio = upsampleRIR(plugin, RIRAudio)
-            upsampleFactor = floor(getSampleRate(plugin) / plugin.RIRFs);
-            upsampledRIRAudio = upsample(RIRAudio, upsampleFactor);
+        function resampledRIRAudio = resampleRIR(plugin, RIRAudio)
+            [p, q] = rat(getSampleRate(plugin)/plugin.nverbFs);
+            resampledRIRAudio = resample(RIRAudio, p, q);
         end
         function [b, a] = calculateLPFCoefficients(plugin)
             w0 = 2 * pi * (plugin.Lowpass/getSampleRate(plugin));
@@ -184,7 +196,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         end
         function [b, a] = calculateHPFCoefficients(plugin)
             w0 = 2 * pi * (plugin.Highpass/getSampleRate(plugin));
-            alpha = sin(w0) / (2 * sqrt(2)/2);
+            alpha = sin(w0) / (sqrt(2)/2);
            
             b0 =  (1 + cos(w0))/2;
             b1 = -(1 + cos(w0));
