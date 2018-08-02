@@ -2,6 +2,8 @@
 
 VST plug-in for Room Impulse Responses synthesis via a spectral autoencoder.
 
+![plugin](img/plugin.png)
+
 ## Usage
 You can download the compiled VST plug-in [here]().
 
