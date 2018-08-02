@@ -38,4 +38,18 @@ The room impulse response dataset to train the autoencoder is not provided due t
 
 The encoder expects a log-power spectogram of size (513, 128, 1) for channels last configuration. It will then produce a 3 dimensional latent representation of shape (1, 1, 1, 3). These can easily be flattened using `numpy.reshape()`. 
 
-The decoder expects a 3 dimentional latent representation of shape (1, 1, 1, 3) with float values (roughly in the range of -2 to 2) and produces a spectrogram of shape (513, 128, 1) which can be flatten down to (513, 128) and either plotted via `librosa.display.specshow()` or converted back to audio using the `ispecgram()` method located in util.py.
+For example, below is the log-power spectra of a ~2 second impulse response.
+
+![input](img/input.png)
+
+When passed through the trained encoder it generates a 3 dimentional embedding.
+
+`z = -0.68267184  0.5946066  -0.5709323`
+
+The decoder expects a 3 dimentional latent representation of shape (1, 1, 1, 3) with float values (roughly in the range of -2 to 2) and produces a spectrogram of shape (513, 128, 1) which can be flattened down to (513, 128) and either plotted via `librosa.display.specshow()` or converted back to audio using the `ispecgram()` method located in util.py.
+
+When the above latent representation is passed through the decoder it generates a spectrogram.
+
+![output](img/output.png)
+
+Notice that this spectrogram closely follows the characteristics of the input, but has been 'blurred'. This is a well established drawback of naive autoencoders. 
