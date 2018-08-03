@@ -5,12 +5,12 @@ classdef NeuralReverberator < audioPlugin & matlab.System
     properties(Nontunable)
         nverb = load('nverb_stereo.mat')
         nverbFs = 16000;
-        nverbLength = 65280;
+        nverbLength = 32512;
         PartitionSize = 2048;
     end     
     
     properties
-        InputGain = -6;
+        InputGain = -3;
         Lowpass = 20000.0;
         Highpass = 20.0;
         PreDelay = 0.0;
@@ -53,13 +53,24 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         UpdateRIRAudio = false;
         ResampleAudio = false;
         
-        pFIRLeft
-        pFIRRight
-        pFracDelay
+        pFracDelay 
+        
+        pFIRLeft32k
+        pFIRRight32k
+        pFIRLeft44k
+        pFIRRight44k
+        pFIRLeft48k
+        pFIRRight48k
+        pFIRLeft96k
+        pFIRRight96k        
+        pFIRLeft192k
+        pFIRRight192k   
+     
         pFIRRateConv32k
+        pFIRRateConv44k
         pFIRRateConv48k
         pFIRRateConv96k
-        pFIRRateConv192k
+        pFIRRateConv192k  
     end
     %----------------------------------------------------------------------
     % public methods
@@ -131,6 +142,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             
             % Initialize supported sample rate converters
             plugin.pFIRRateConv32k = dsp.FIRRateConverter('InterpolationFactor', 2, 'DecimationFactor', 1);
+            plugin.pFIRRateConv44k = dsp.FIRRateConverter('InterpolationFactor', 11, 'DecimationFactor', 4);
             plugin.pFIRRateConv48k = dsp.FIRRateConverter('InterpolationFactor', 3, 'DecimationFactor', 1);
             plugin.pFIRRateConv96k = dsp.FIRRateConverter('InterpolationFactor', 6, 'DecimationFactor', 1);
             plugin.pFIRRateConv192k = dsp.FIRRateConverter('InterpolationFactor', 12, 'DecimationFactor', 1);
@@ -167,10 +179,19 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         function resetImpl(plugin)
             
             % Rest state of system objects
-            reset(plugin.pFIRLeft);
-            reset(plugin.pFIRRight);            
             reset(plugin.pFracDelay);
+            reset(plugin.pFIRLeft32k);
+            reset(plugin.pFIRRight32k);            
+            reset(plugin.pFIRLeft44k);
+            reset(plugin.pFIRRight44k);  
+            reset(plugin.pFIRLeft48k);
+            reset(plugin.pFIRRight48k);  
+            reset(plugin.pFIRLeft96k);
+            reset(plugin.pFIRRight96k);  
+            reset(plugin.pFIRLeft192k);
+            reset(plugin.pFIRRight192k); 
             reset(plugin.pFIRRateConv32k);
+            reset(plugin.pFIRRateConv44k);
             reset(plugin.pFIRRateConv48k);
             reset(plugin.pFIRRateConv96k);
             reset(plugin.pFIRRateConv192k);
@@ -215,7 +236,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             plugin.UpdateRIRAudio = flag;
         end
         
-        function paddedArray = pad1DArray(plugin, array, outputArrayLength)
+        function paddedArray = pad1DArray(~, array, outputArrayLength)
             inputArrayLength = length(array);
             padLength = outputArrayLength - inputArrayLength;
             paddedArray = [array, zeros(1, padLength)];
@@ -241,8 +262,9 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         function [resampledPaddedRIRAudio] = resampleRIRAudio(plugin, RIRAudio)
             if     getSampleRate(plugin) == 32000
                 resampledRIRAudio = plugin.pFIRRateConv32k(RIRAudio);
+                % lets try and do the padding inside this method
             elseif getSampleRate(plugin) == 44100
-                resampledRIRAudio = RIRAudio; % not supported
+                resampledRIRAudio = plugin.pFIRRateConv44k(RIRAudio);
             elseif getSampleRate(plugin) == 48000
                 resampledRIRAudio = plugin.pFIRRateConv48k(RIRAudio);
             elseif getSampleRate(plugin) == 96000
@@ -255,7 +277,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             resampledPaddedRIRAudio = pad1DArray(plugin, resampledRIRAudio(end,:), 384000); % not sure how to index this?
         end
         
-        function [normalizedRIRAudio] = normalizeRIRAudio(plugin, RIRAudio, peak)
+        function [normalizedRIRAudio] = normalizeRIRAudio(~, RIRAudio, peak)
             currentPeak = max(RIRAudio);
             gain = 10^(peak/20) / currentPeak;
             normalizedRIRAudio = gain * RIRAudio;            
@@ -284,7 +306,8 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         end
         function [b, a] = calculateLPFCoefficients(plugin)
             w0 = 2 * pi * (plugin.Lowpass/getSampleRate(plugin));
-            alpha = sin(w0) / (sqrt(2));
+            Q = 1/sqrt(2);
+            alpha = (sin(w0) / (2 * Q));
             
             b0 = (1 - cos(w0))/2;
             b1 = (1 - cos(w0));
@@ -293,12 +316,13 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             a1 = -2 * cos(w0);
             a2 =  1 - alpha;
             
-            b = [b0, b1, b2];
-            a = [a0, a1, a2];
+            b = [b0/a0, b1/a0, b2/a0];
+            a = [a0/a0, a1/a0, a2/a0];
         end
         function [b, a] = calculateHPFCoefficients(plugin)
             w0 = 2 * pi * (plugin.Highpass/getSampleRate(plugin));
-            alpha = sin(w0) / (sqrt(2)/2);
+            Q = 1/sqrt(2);
+            alpha = (sin(w0) / (2 * Q));
            
             b0 =  (1 + cos(w0))/2;
             b1 = -(1 + cos(w0));
@@ -307,8 +331,8 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             a1 =  -2 * cos(w0);
             a2 =   1 - alpha;
             
-            b = [b0, b1, b2];
-            a = [a0, a1, a2];
+            b = [b0/a0, b1/a0, b2/a0];
+            a = [a0/a0, a1/a0, a2/a0];
         end
     end
     
