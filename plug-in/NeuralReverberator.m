@@ -37,7 +37,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             audioPluginParameter('C','DisplayName','C','Mapping',{'int',0,9}),...
             audioPluginParameter('Width','DisplayName','Width','Mapping',{'int',-4,4}),...
             audioPluginParameter('Mix','DisplayName','Mix','Label','%','Mapping',{'lin',0,100}),...
-            audioPluginParameter('resampleRIR','DisplayName','Resample','Mapping', {'enum','Enable','Disable'}));
+            audioPluginParameter('resampleRIR','DisplayName','Resample','Mapping', {'enum','Disable','Enable'}));
     end
     %----------------------------------------------------------------------
     % Private properties
@@ -215,7 +215,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
                 resampledRIRAudio = plugin.pFIRRateConv32k(transpose(RIRAudio));
                 resampledRIRAudio = transpose(resampledRIRAudio);
                 resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
-            elseif outputFs == 44000 && plugin.resampleRIR == true
+            elseif outputFs == 44100 && plugin.resampleRIR == true
                 resampledRIRAudio = plugin.pFIRRateConv44k(transpose(RIRAudio));
                 resampledRIRAudio = transpose(resampledRIRAudio);
                 resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
