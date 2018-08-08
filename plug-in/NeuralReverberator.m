@@ -20,6 +20,7 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         C = 0;
         Width = 0;
         Mix = 100;
+        resampleRIR = true;
     end
     
     properties (Constant)
@@ -35,7 +36,8 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             audioPluginParameter('B','DisplayName','B','Mapping',{'int',0,9}),...
             audioPluginParameter('C','DisplayName','C','Mapping',{'int',0,9}),...
             audioPluginParameter('Width','DisplayName','Width','Mapping',{'int',-4,4}),...
-            audioPluginParameter('Mix','DisplayName','Mix','Label','%','Mapping',{'lin',0,100}));
+            audioPluginParameter('Mix','DisplayName','Mix','Label','%','Mapping',{'lin',0,100}),...
+            audioPluginParameter('resampleRIR','DisplayName','Resample','Mapping', {'enum','Enable','Disable'}));
     end
     %----------------------------------------------------------------------
     % Private properties
@@ -209,13 +211,25 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         end
         
         function [resampledRIRAudio] = resample(plugin, RIRAudio, outputFs)
-            %if outputFs == 48000
-            %    resampledRIRAudio = plugin.pFIRRateConv48k(transpose(RIRAudio));
-            %    resampledRIRAudio = transpose(resampledRIRAudio);
-            %else
-            %    resampledRIRAudio = RIRAudio;
-            %end
-            resampledRIRAudio = pad1DArray(plugin, RIRAudio, plugin.nverbTime * 96000);
+            if outputFs == 32000 && plugin.resampleRIR == true
+                resampledRIRAudio = plugin.pFIRRateConv32k(transpose(RIRAudio));
+                resampledRIRAudio = transpose(resampledRIRAudio);
+                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
+            elseif outputFs == 44000 && plugin.resampleRIR == true
+                resampledRIRAudio = plugin.pFIRRateConv44k(transpose(RIRAudio));
+                resampledRIRAudio = transpose(resampledRIRAudio);
+                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
+            elseif outputFs == 48000 && plugin.resampleRIR == true
+                resampledRIRAudio = plugin.pFIRRateConv48k(transpose(RIRAudio));
+                resampledRIRAudio = transpose(resampledRIRAudio);
+                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
+            elseif outputFs == 96000 && plugin.resampleRIR == true
+                resampledRIRAudio = plugin.pFIRRateConv96k(transpose(RIRAudio));
+                resampledRIRAudio = transpose(resampledRIRAudio);
+                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
+            else
+                resampledRIRAudio = pad1DArray(plugin, RIRAudio, plugin.nverbTime * 96000);
+            end
         end
         
         function [normalizedRIRAudio] = normalize(~, RIRAudio, peak)
@@ -298,6 +312,13 @@ classdef NeuralReverberator < audioPlugin & matlab.System
         end
         function val = get.Width(plugin)
             val = plugin.Width;
+        end
+        function set.resampleRIR(plugin, val)
+            plugin.resampleRIR = val;
+            setUpdateRIRAudio(plugin, true);
+        end
+        function val = get.resampleRIR(plugin)
+            val = plugin.resampleRIR;
         end
     end  
 end
