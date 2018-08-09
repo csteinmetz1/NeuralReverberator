@@ -1,26 +1,27 @@
 classdef NeuralReverberator < audioPlugin & matlab.System
     %----------------------------------------------------------------------
-    % Public properties
+    % public properties
     %----------------------------------------------------------------------
     properties(Nontunable)
-        nverb = load('nverb_stereo.mat')
-        nverbFs = 16000;
-        nverbLength = 32512;
-        nverbTime = 2.032;
-        PartitionSize = 2048;
+        nverb = load('nverb_stereo.mat') % contains interleved stereo outputs
+        nverbFs = 16000;                 % 16 kHz sampling rate 
+        nverbLength = 32512;             % duration of RIR in samples
+        nverbTime = 2.032;               % duration of RIR in seconds
     end     
     
     properties
-        InputGain = -3;
-        Lowpass = 20000.0;
-        Highpass = 20.0;
-        PreDelay = 0.0;
-        A = 0;
-        B = 0;
-        C = 0;
-        Width = 0;
-        Mix = 100;
-        resampleRIR = true;
+        inputGain = -3;       % dB factor to scale input signal
+        lowpassFc = 20000.0;  % cutoff freq of 2nd order lowpass filter
+        lowpass = false;      % control to enable/disable lowpass filter
+        highpassFc = 20.0;    % cutoff freq of 2nd order highpass filter
+        highpass = false;     % control to enable/disable highpass filter
+        predelay = 0.0;       % delay in ms applied to the wet signal
+        x = 0;                % first latent dimension 
+        y = 0;                % second latent dimension 
+        z = 0;                % third latent dimension 
+        width = 0;            % control impulse response applied to left and right channels      
+        mix = 100;            % percent of wet to dry signal in output
+        resampling = true;    % control resampling to match operating sample rate
     end
     
     properties (Constant)
@@ -28,133 +29,141 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             'InputChannels',2,...
             'OutputChannels',2,...
             'PluginName','NeuralReverberator',...
-            audioPluginParameter('InputGain','DisplayName', 'Input Gain','Label', 'dB','Mapping', {'pow', 1/3, -140, 12}),...
-            audioPluginParameter('Lowpass','DisplayName','Lowpass','Label','Hz','Mapping',{'log',500.0,20000.0}),...
-            audioPluginParameter('Highpass','DisplayName','Highpass','Label','Hz','Mapping',{'log',20.0,5000.0}),...
-            audioPluginParameter('PreDelay','DisplayName','Pre-Delay','Label','ms','Mapping',{'lin',0,300.0}),...
-            audioPluginParameter('A','DisplayName','A','Mapping',{'int',0,9}),...
-            audioPluginParameter('B','DisplayName','B','Mapping',{'int',0,9}),...
-            audioPluginParameter('C','DisplayName','C','Mapping',{'int',0,9}),...
-            audioPluginParameter('Width','DisplayName','Width','Mapping',{'int',-4,4}),...
-            audioPluginParameter('Mix','DisplayName','Mix','Label','%','Mapping',{'lin',0,100}),...
-            audioPluginParameter('resampleRIR','DisplayName','Resample','Mapping', {'enum','Disable','Enable'}));
+            audioPluginParameter('inputGain','DisplayName', 'Input Gain','Label', 'dB','Mapping', {'pow', 1/3, -140, 12}),...
+            audioPluginParameter('x','DisplayName','x','Mapping',{'int',0,9}),...
+            audioPluginParameter('y','DisplayName','y','Mapping',{'int',0,9}),...
+            audioPluginParameter('z','DisplayName','z','Mapping',{'int',0,9}),...
+            audioPluginParameter('width','DisplayName','Width','Mapping',{'int',-4,4}),...
+            audioPluginParameter('predelay','DisplayName','Pre-Delay','Label','ms','Mapping',{'lin',0,100.0}),...
+            audioPluginParameter('lowpass','DisplayName','Lowpass','Mapping', {'enum','Disable','Enable'}),...
+            audioPluginParameter('lowpassFc','DisplayName','Lowpass Fc','Label','Hz','Mapping',{'log',500.0,20000.0}),...
+            audioPluginParameter('highpass','DisplayName','Highpass','Mapping', {'enum','Disable','Enable'}),...
+            audioPluginParameter('highpassFc','DisplayName','Highpass Fc','Label','Hz','Mapping',{'log',20.0,5000.0}),...
+            audioPluginParameter('mix','DisplayName','Mix','Label','%','Mapping',{'lin',0,100}),...
+            audioPluginParameter('resampling','DisplayName','Resampling','Mapping', {'enum','Disable','Enable'}));
     end
     %----------------------------------------------------------------------
-    % Private properties
+    % private properties
     %----------------------------------------------------------------------
     properties(Access = private)
+        % Highpass filter coefficients 
         HPFNum
         HPFDen
         HPFState = zeros(2);
         
+        % Lowpass filter coefficients 
         LPFNum
         LPFDen
         LPFState = zeros(2);
-             
-        UpdateHPF = false;
-        UpdateLPF = false;
-        UpdateRIRAudio = false;
-        ResampleAudio = false;
+                   
+        % MATLAB System Objects
+        pFracDelay          % delay for pre-delay
+        pFIRLeft            % left channel convolutional Filter
+        pFIRRight           % right channel convolution Filter
+        pFIRRateConv32k     % 16 kHz to 32 kHz SRC
+        pFIRRateConv44k     % 44.1 kHz to 32 kHz SRC
+        pFIRRateConv48k     % 48 kHz to 32 kHz SRC
+        pFIRRateConv96k     % 96 kHz to 32 kHz SRC
         
-        pFracDelay 
-        
-        pFIRLeft
-        pFIRRight
-        
-        pFIRRateConv32k
-        pFIRRateConv44k
-        pFIRRateConv48k
-        pFIRRateConv96k
-
+        % Paramter update flags 
+        updateHPF = false;  % update HPF coefficeints
+        updateLPF = false;  % update HPF coefficeints
+        updateFIR = false;  % update FIR (left and right)
     end
     %----------------------------------------------------------------------
     % public methods
     %----------------------------------------------------------------------
     methods(Access = protected)
         function y = stepImpl(plugin,u)
-            
-            if plugin.UpdateRIRAudio
-                % Get proper RIRs for given parameters
-                [RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin);
+            % -------------------- Parameter Updates ----------------------
+            if plugin.updateFIR
+                % get proper RIRs for given parameters
+                [left, right] = getRIR(plugin);
                 
-                % Upsample to match inpu
-                resampledRIRAudioLeft = resample(plugin, RIRAudioLeft, getSampleRate(plugin));
-                resampledRIRAudioRight = resample(plugin, RIRAudioRight, getSampleRate(plugin));
+                % resample to match input (for supported Fs)
+                left = resample(plugin, left, getSampleRate(plugin));
+                right = resample(plugin, right, getSampleRate(plugin));
 
-                % Normalize audio to -12dB
-                normalizedRIRAudioLeft = normalize(plugin, resampledRIRAudioLeft, -12);
-                normalizedRIRAudioRight = normalize(plugin, resampledRIRAudioRight, -12);
+                % normalize to -12dB
+                left = normalize(plugin, left, -12);
+                right = normalize(plugin, right, -12);
                 
-                % Update FIR filter of the current sample rate
-                plugin.pFIRLeft.Numerator = normalizedRIRAudioLeft;
-                plugin.pFIRRight.Numerator = normalizedRIRAudioRight;
-                setUpdateRIRAudio(plugin,false)
+                % update FIR filter coefficients
+                plugin.pFIRLeft.Numerator = left;
+                plugin.pFIRRight.Numerator = right;
+                setUpdateFIR(plugin,false)
             end
             
-            % Update HPF coefficients
-            if plugin.UpdateHPF
-                [plugin.HPFNum, plugin.HPFDen] = calculateHPFCoefficients(plugin);
+            % update HPF coefficients
+            if plugin.updateHPF
+                [plugin.HPFNum, plugin.HPFDen] = calcHPFCoefs(plugin);
                 setUpdateHPF(plugin,false)
             end
             
-            % Update LPF coefficients
-            if plugin.UpdateLPF              
-                [plugin.LPFNum, plugin.LPFDen] = calculateLPFCoefficients(plugin);
+            % update LPF coefficients
+            if plugin.updateLPF              
+                [plugin.LPFNum, plugin.LPFDen] = calcLPFCoefs(plugin);
                 setUpdateLPF(plugin,false)
             end
             
+            % -------------------- Audio Processing -----------------------
             % Apply input gain
-            u = 10.^(plugin.InputGain/20)*u;
+            dry = 10.^(plugin.inputGain/20)*u;
             
             % Convolve RIR with left and right channels
-            wetLeft = step(plugin.pFIRLeft, u(:,1));
-            wetRight = step(plugin.pFIRRight, u(:,2));
+            wetLeft = plugin.pFIRLeft(dry(:,1));
+            wetRight = plugin.pFIRRight(dry(:,2));
 
             % Pack left and right channels into 2D array
             wet = [wetLeft, wetRight];
             
             % Apply HPF and LPF filter
-            [wet, plugin.HPFState] = filter(plugin.HPFNum, plugin.HPFDen, wet, plugin.HPFState);           
-            [wet, plugin.LPFState] = filter(plugin.LPFNum, plugin.LPFDen, wet, plugin.LPFState);
+            if plugin.highpass
+                [wet, plugin.HPFState] = filter(plugin.HPFNum, plugin.HPFDen,...
+                                                wet, plugin.HPFState);       
+            end
+            if plugin.lowpass
+                [wet, plugin.LPFState] = filter(plugin.LPFNum, plugin.LPFDen,...
+                                                wet, plugin.LPFState);
+            end
             
-            % Perform Pre-delay
-            delaySamples = (plugin.PreDelay/1000) * getSampleRate(plugin);
+            % add Pre-delay
+            delaySamples = (plugin.predelay/1000) * getSampleRate(plugin);
             wet = plugin.pFracDelay(wet, delaySamples);
      
-            % Mix the dry and wet signals together
-            y = ((1-(plugin.Mix/100)) * u) + ((plugin.Mix/100) * wet);
+            % mix wet and dry signals together
+            y = ((1-(plugin.mix/100)) * dry) + ((plugin.mix/100) * wet);
         end
 
-        function setupImpl(plugin, u)
-                       
-            % Initialize supported sample rate converters
+        function setupImpl(plugin, ~)    
+            % initialize supported sample rate converters
             plugin.pFIRRateConv32k = dsp.FIRRateConverter(2,1);
-            plugin.pFIRRateConv44k = dsp.FIRRateConverter(3,1); % set to 48k for now
+            plugin.pFIRRateConv44k = dsp.FIRRateConverter(11,4);
             plugin.pFIRRateConv48k = dsp.FIRRateConverter(3,1);
             plugin.pFIRRateConv96k = dsp.FIRRateConverter(6,1);
             
-            % Initialize HPF and LPF filters
-            [plugin.HPFNum, plugin.HPFDen] = calculateHPFCoefficients(plugin);
-            [plugin.LPFNum, plugin.LPFDen] = calculateLPFCoefficients(plugin);
+            % initialize HPF and LPF filters
+            [plugin.HPFNum, plugin.HPFDen] = calcHPFCoefs(plugin);
+            [plugin.LPFNum, plugin.LPFDen] = calcLPFCoefs(plugin);
             
-            RIRAudio = zeros(1, plugin.nverbTime * 96000); % constant buffer of 195,072 samples
+            % constant buffer of 195,072 samples
+            numerator = zeros(1, plugin.nverbTime * 96000); 
 
-            % Create frequency domain filters for convolution 
-            plugin.pFIRLeft = dsp.FrequencyDomainFIRFilter('Numerator', RIRAudio,...
-                'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
-            plugin.pFIRRight = dsp.FrequencyDomainFIRFilter('Numerator', RIRAudio,...
-                'PartitionForReducedLatency', true, 'PartitionLength', plugin.PartitionSize);
+            % create FIR filters for convolution 
+            plugin.pFIRLeft = dsp.FrequencyDomainFIRFilter('Numerator', numerator,...
+                'PartitionForReducedLatency', true, 'PartitionLength', 2048);
+            plugin.pFIRRight = dsp.FrequencyDomainFIRFilter('Numerator', numerator,...
+                'PartitionForReducedLatency', true, 'PartitionLength', 2048);
             
             % Create fractional delay
-            plugin.pFracDelay = dsp.VariableFractionalDelay(...
-                'MaximumDelay',192000*.3);
+            plugin.pFracDelay = dsp.VariableFractionalDelay('MaximumDelay',192000*.3);
             
-            setUpdateRIRAudio(plugin, true)
+            % FIR coefficients will be set on first step
+            setUpdateFIR(plugin, true)
         end
 
         function resetImpl(plugin)
-            
-            % Rest state of system objects
+            % rest state of system objects
             reset(plugin.pFracDelay);
             reset(plugin.pFIRLeft);
             reset(plugin.pFIRRight);  
@@ -163,162 +172,168 @@ classdef NeuralReverberator < audioPlugin & matlab.System
             reset(plugin.pFIRRateConv48k);
             reset(plugin.pFIRRateConv96k);
             
-            % Reset intial conditions for filters
+            % reset intial conditions for filters
             plugin.HPFState = zeros(2);
             plugin.LPFState = zeros(2);
             
-            setUpdateRIRAudio(plugin,true)
+            % request update of filters
+            setUpdateFIR(plugin,true)
             setUpdateHPF(plugin,true)
             setUpdateLPF(plugin,true)
         end
     end
-    
+    %----------------------------------------------------------------------
+    % private methods
+    %----------------------------------------------------------------------
     methods (Access = private)
+        %----------------- Parameter Change Flags -------------------------
         function setUpdateHPF(plugin,flag)
-            plugin.UpdateHPF = flag;
+            plugin.updateHPF = flag;
         end
-        
         function setUpdateLPF(plugin,flag)
-            plugin.UpdateLPF = flag;
+            plugin.updateLPF = flag;
         end
-        
-        function setUpdateRIRAudio(plugin,flag)
-            plugin.UpdateRIRAudio = flag;
+        function setUpdateFIR(plugin,flag)
+            plugin.updateFIR = flag;
         end
-        
-        function paddedArray = pad1DArray(~, array, outputArrayLength)
-            inputArrayLength = length(array);
-            padLength = outputArrayLength - inputArrayLength;
-            paddedArray = [array, zeros(1, padLength)];
+        %------------------- Signal Processing Utils-----------------------
+        function y = padVector(~, x, outputLength)
+            inputLength = length(x);
+            padLength = outputLength - inputLength;
+            y = [x, zeros(1, padLength)];
         end
-        
-        function [RIRAudioLeft, RIRAudioRight] = getRIRAudio(plugin)
+        function [left, right] = getRIR(plugin)
+            % determine left and right channel RIR index
+            leftIndex = (plugin.x * 200 + plugin.y * 20 + plugin.z * 2) + 1;
+            rightIndex = leftIndex + plugin.width;
             
-            % determine left and right channel RIR indexes
-            RIRLeftIndex = (plugin.A * 200 + plugin.B * 20 + plugin.C * 2) + 1;
-            RIRRightIndex = RIRLeftIndex + plugin.Width;
-            
-            % Perform checking on index to ensure its in range
-            if RIRRightIndex > 2000
-                RIRRightIndex = 2000;
-            elseif RIRRightIndex < 1
-                RIRRightIndex = 1;
+            % perform checking on index to ensure its in range
+            if rightIndex > 2000
+                rightIndex = 2000; % max valid index
+            elseif rightIndex < 1
+               rightIndex = 1;     % min valid index
             end
-            
-            % Extract proper RIRs as column slices
-            RIRAudioLeft = transpose(plugin.nverb.RIRAudio(:,RIRLeftIndex));
-            RIRAudioRight = transpose(plugin.nverb.RIRAudio(:,RIRRightIndex));
+
+            % extract proper RIRs as column slices - return as row vector
+            left = transpose(plugin.nverb.RIRAudio(:,leftIndex));
+            right = transpose(plugin.nverb.RIRAudio(:,rightIndex));
         end
-        
-        function [resampledRIRAudio] = resample(plugin, RIRAudio, outputFs)
-            if outputFs == 32000 && plugin.resampleRIR == true
-                resampledRIRAudio = plugin.pFIRRateConv32k(transpose(RIRAudio));
-                resampledRIRAudio = transpose(resampledRIRAudio);
-                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
-            elseif outputFs == 44100 && plugin.resampleRIR == true
-                resampledRIRAudio = plugin.pFIRRateConv44k(transpose(RIRAudio));
-                resampledRIRAudio = transpose(resampledRIRAudio);
-                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
-            elseif outputFs == 48000 && plugin.resampleRIR == true
-                resampledRIRAudio = plugin.pFIRRateConv48k(transpose(RIRAudio));
-                resampledRIRAudio = transpose(resampledRIRAudio);
-                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
-            elseif outputFs == 96000 && plugin.resampleRIR == true
-                resampledRIRAudio = plugin.pFIRRateConv96k(transpose(RIRAudio));
-                resampledRIRAudio = transpose(resampledRIRAudio);
-                resampledRIRAudio = pad1DArray(plugin, resampledRIRAudio, plugin.nverbTime * 96000);
+        function [y] = resample(plugin, x, outFs)
+            if plugin.resampling
+                if   outFs == 32000
+                    y = plugin.pFIRRateConv32k(transpose(x));
+                    y = transpose(y);
+                    y = padVector(plugin, y, plugin.nverbTime * 96000);
+                elseif outFs == 44100
+                    y = plugin.pFIRRateConv44k(transpose(x));
+                    y = transpose(y);
+                    y = padVector(plugin, y, plugin.nverbTime * 96000);
+                elseif outFs == 48000 
+                    y = plugin.pFIRRateConv48k(transpose(x));
+                    y = transpose(y);
+                    y = padVector(plugin, y, plugin.nverbTime * 96000);
+                elseif outFs == 96000
+                    y = plugin.pFIRRateConv96k(transpose(x));
+                    y = transpose(y);
+                    y = padVector(plugin, y, plugin.nverbTime * 96000);
+                else
+                    y = padVector(plugin, x, plugin.nverbTime * 96000);
+                end
             else
-                resampledRIRAudio = pad1DArray(plugin, RIRAudio, plugin.nverbTime * 96000);
+                y = padVector(plugin, x, plugin.nverbTime * 96000);
             end
         end
-        
-        function [normalizedRIRAudio] = normalize(~, RIRAudio, peak)
-            currentPeak = max(RIRAudio);
+        function [y] = normalize(~, x, peak)
+            currentPeak = max(x);
             gain = 10^(peak/20) / currentPeak;
-            normalizedRIRAudio = gain * RIRAudio;            
+            y = gain * x;            
         end
-        
-        function [b, a] = calculateLPFCoefficients(plugin)
-            w0 = 2 * pi * (plugin.Lowpass/getSampleRate(plugin));
+        %--------------------- Coefficient Cooking ------------------------
+        function [b, a] = calcLPFCoefs(plugin)
+            % initial values
+            w0 = 2 * pi * (plugin.lowpassFc/getSampleRate(plugin));
             Q = 1/sqrt(2);
             alpha = (sin(w0) / (2 * Q));
-            
+            % coefs calculation
             b0 = (1 - cos(w0))/2;
             b1 = (1 - cos(w0));
             b2 = (1 - cos(w0))/2;
             a0 =  1 + alpha;
             a1 = -2 * cos(w0);
             a2 =  1 - alpha;
-            
+            % normalized output coefs
             b = [b0/a0, b1/a0, b2/a0];
             a = [a0/a0, a1/a0, a2/a0];
         end
-        function [b, a] = calculateHPFCoefficients(plugin)
-            w0 = 2 * pi * (plugin.Highpass/getSampleRate(plugin));
+        function [b, a] = calcHPFCoefs(plugin)
+            % initial values
+            w0 = 2 * pi * (plugin.highpassFc/getSampleRate(plugin));
             Q = 1/sqrt(2);
             alpha = (sin(w0) / (2 * Q));
-           
+            % coef calculation
             b0 =  (1 + cos(w0))/2;
             b1 = -(1 + cos(w0));
             b2 =  (1 + cos(w0))/2;
             a0 =   1 + alpha;
             a1 =  -2 * cos(w0);
             a2 =   1 - alpha;
-            
+            % normalized output coefs
             b = [b0/a0, b1/a0, b2/a0];
             a = [a0/a0, a1/a0, a2/a0];
         end
     end
-    
+    %----------------------------------------------------------------------
+    % setter and getter methods
+    %----------------------------------------------------------------------
     methods 
-        function set.Lowpass(plugin, val)
-            plugin.Lowpass = val;
+        function set.lowpassFc(plugin, val)
+            plugin.lowpassFc = val;
             setUpdateLPF(plugin, true);
         end
-        function val = get.Lowpass(plugin)
-            val = plugin.Lowpass;
+        function val = get.lowpassFc(plugin)
+            val = plugin.lowpassFc;
         end
-        function set.Highpass(plugin, val)
-            plugin.Highpass = val;
+        function set.highpassFc(plugin, val)
+            plugin.highpassFc = val;
             setUpdateHPF(plugin, true);
         end
-        function val = get.Highpass(plugin)
-            val = plugin.Highpass;
+        function val = get.highpassFc(plugin)
+            val = plugin.highpassFc;
         end
-        function set.A(plugin, val)
-            plugin.A = val;
-            setUpdateRIRAudio(plugin, true);
+        function set.x(plugin, val)
+            plugin.x = val;
+            setUpdateFIR(plugin, true);
         end
-        function val = get.A(plugin)
-            val = plugin.A;
+        function val = get.x(plugin)
+            val = plugin.x;
         end  
-        function set.B(plugin, val)
-            plugin.B = val;
-            setUpdateRIRAudio(plugin, true);
+        function set.y(plugin, val)
+            plugin.y = val;
+            setUpdateFIR(plugin, true);
         end
-        function val = get.B(plugin)
-            val = plugin.B;
+        function val = get.y(plugin)
+            val = plugin.y;
         end      
-        function set.C(plugin, val)
-            plugin.C = val;
-            setUpdateRIRAudio(plugin, true);
+        function set.z(plugin, val)
+            plugin.z = val;
+            setUpdateFIR(plugin, true);
         end
-        function val = get.C(plugin)
-            val = plugin.C;
+        function val = get.z(plugin)
+            val = plugin.z;
         end
-        function set.Width(plugin, val)
-            plugin.Width = val;
-            setUpdateRIRAudio(plugin, true);
+        function set.width(plugin, val)
+            plugin.width = val;
+            setUpdateFIR(plugin, true);
         end
-        function val = get.Width(plugin)
-            val = plugin.Width;
+        function val = get.width(plugin)
+            val = plugin.width;
         end
-        function set.resampleRIR(plugin, val)
-            plugin.resampleRIR = val;
-            setUpdateRIRAudio(plugin, true);
+        function set.resampling(plugin, val)
+            plugin.resampling = val;
+            setUpdateFIR(plugin, true);
         end
-        function val = get.resampleRIR(plugin)
-            val = plugin.resampleRIR;
+        function val = get.resampling(plugin)
+            val = plugin.resampling;
         end
     end  
 end
