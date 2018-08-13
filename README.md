@@ -12,7 +12,7 @@ Librosa was used to perform a transformation to audio samples that match the gen
 
 ## Install
 You can download builds of the compiled VST2 plug-in below:
-* [64-bit macOS]()
+* [64-bit macOS](https://drive.google.com/open?id=1V4gkSTsCwdWzbczlKe73U6t86WilxElq)
 * [64-bit Windows]()
 * [32-bit Windows]()
 
@@ -23,7 +23,7 @@ or on Windows commonly `C:\Program Files\Common Files\VST2`.
 
 After restarting your DAW you should see the plug-in appear as `NeuralReverberator`
 
-## Control
+## Controls
 The VST plug-in interface provides the user with a number of controls.
 
 #### Input Gain 
@@ -65,6 +65,8 @@ You can demo the plug-in as MATLAB code if you would like. Press the plug-in gen
 ![vst_generation](img/vst_generation.png)
 
 When you are ready to generate the plug-in press `Validate and generate`. This process will validate the plug-in code and then compile the MATLAB code down to C/C++ code to operate as a VST 2 plug-in. Note that this process can take up 15 minutes to complete and can consume a significant chunk of memory (up to 15GB).
+
+> Note: MATLAB on Windows requires the Visual Studio C++ Compiler in order to build VST plugins
 
 ## Training
 Data preprocessing, training, and output generation is all handled in Python with our good friends [Keras](https://keras.io/) and [librosa](https://librosa.github.io/librosa/). 
