@@ -5,7 +5,7 @@ import librosa.display
 import soundfile as sf
 from keras.models import load_model
 from util import ispecgram, fix_specgram_shape, plot_specgrams
-from generate import generate_z, generate_specgram
+from generate import generate_z, generate_specgram, audio_from_specgram
 
 import matplotlib as mpl  
 mpl.use('agg')
@@ -24,3 +24,4 @@ print('z = {}'.format(_z))
 out_spec = generate_specgram(decoder, _z)
 print(out_spec.shape)
 plot_specgrams(out_spec, 16000, 'ir_00x00y_16000_5.png', './')
+audio_from_specgram(out_spec, 16000, 'ir_00x00y_16000_5.wav')
