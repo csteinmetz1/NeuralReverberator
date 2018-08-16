@@ -13,8 +13,9 @@ Librosa was used to perform a transformation to audio samples that match the gen
 ## Install
 You can download builds of the compiled VST2 plug-in below:
 * [64-bit macOS](https://drive.google.com/open?id=1V4gkSTsCwdWzbczlKe73U6t86WilxElq)
-* [64-bit Windows]()
-* [32-bit Windows]()
+* 64-bit Windows
+* 32-bit Windows
+> Windows builds will be available shortly
 
 Once you have downloaded the proper build you need to place it in the directory where your DAW expects to find VST2 plugins. 
 
