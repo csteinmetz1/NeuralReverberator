@@ -24,6 +24,10 @@ or on Windows commonly `C:\Program Files\Common Files\VST2`.
 
 After restarting your DAW you should see the plug-in appear as `NeuralReverberator`
 
+## Autoencoder Latent Space
+![latent](img/traverse_circle_tilt.gif)
+> Traversing the latent space of the trained model
+
 ## Controls
 The VST plug-in interface provides the user with a number of controls.
 
