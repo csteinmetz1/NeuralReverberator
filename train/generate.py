@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 import librosa
 import librosa.display
@@ -78,7 +79,10 @@ def plot_from_specgram(spec, rate, output):
     
 
 if __name__ == '__main__':
-    # loaded trained models
+
+    #parser = argparse.ArgumentParser(description="Generate RIRs from trained encoder.")
+    #parser.add_argument()
+
     encoder = load_model("models/encoder.hdf5")
     decoder = load_model("models/decoder.hdf5")
 
@@ -90,9 +94,13 @@ if __name__ == '__main__':
     #    print(_z)
     #    z.append(_z)
 
-    #print('Max:', np.max(z))
-    #print('Mean:', np.mean(z))
-    #rint('Min:', np.min(z))
+    #_max = np.max(z)
+    #_mean = np.mean(z)
+    #_min = np.min(z)
+
+    #print('Max: {:03f}', _max)
+    #print('Mean: {:03f}', _mean)
+    #print('Min: {:03f}', _min)
 
     # generate audio and plots over latent space
     idx = 0
@@ -103,21 +111,21 @@ if __name__ == '__main__':
                 z = np.reshape(np.array([a, b, c]), (1, 1, 1, 3)) # think i want to fix this in my model
                 filename = "_".join(["({:+0.3f})".format(dim) for dim in np.reshape(z, (3))])
                 filename = "{:04d}_{}".format(idx, filename)
-                filepath = os.path.join('pre_compute2', filename)
+                filepath = os.path.join('pre_compute_demo', filename)
                 spec = generate_specgram(decoder, z)
-                audio_from_specgram(spec, 16000, filepath)
-                plot_from_specgram(spec, 16000, filepath)
+                #audio_from_specgram(spec, 16000, filepath)
+                plot_from_specgram(np.abs(spec), 16000, filepath)
                 idx += 1
 
                 # now perturb z to generete second channel
-                e = np.array([np.random.normal(scale=0.01), np.random.normal(scale=0.01), np.random.normal(scale=0.01)])
-                z = np.array([a, b, c]) - e
-                print("{:04d} | z = [ {:+0.3f} {:+0.3f} {:+0.3f} ]".format(idx, z[0], z[1], z[2]))
-                z = np.reshape(z, (1, 1, 1, 3)) # think i want to fix this in my model
-                filename = "_".join(["({:+0.3f})".format(dim) for dim in np.reshape(z, (3))])
-                filename = "{:04d}_{}".format(idx, filename)
-                filepath = os.path.join('pre_compute2', filename)
-                spec = generate_specgram(decoder, z)
-                audio_from_specgram(spec, 16000, filepath)
-                plot_from_specgram(spec, 16000, filepath)
-                idx += 1
+                #e = np.array([np.random.normal(scale=0.01), np.random.normal(scale=0.01), np.random.normal(scale=0.01)])
+                #z = np.array([a, b, c]) - e
+                #print("{:04d} | z = [ {:+0.3f} {:+0.3f} {:+0.3f} ]".format(idx, z[0], z[1], z[2]))
+                #z = np.reshape(z, (1, 1, 1, 3)) # think i want to fix this in my model
+                #filename = "_".join(["({:+0.3f})".format(dim) for dim in np.reshape(z, (3))])
+                #filename = "{:04d}_{}".format(idx, filename)
+                #filepath = os.path.join('pre_compute2', filename)
+                #spec = generate_specgram(decoder, z)
+                #audio_from_specgram(spec, 16000, filepath)
+                #plot_from_specgram(spec, 16000, filepath)
+                #idx += 1
