@@ -93,10 +93,10 @@ When the above latent representation is passed through the decoder it generates 
 
 ![output](img/output.png)
 
-Notice that this spectrogram closely follows the characteristics of the input, but has been 'blurred'. This is a well established drawback of naive autoencoders. For listening examples check out the [blog post on my website]().
+Notice that this spectrogram closely follows the characteristics of the input, but has been 'blurred'. This is a well established drawback of naive autoencoders. For listening examples check out the [blog post on my website](https://www.christiansteinmetz.com/projects-blog/neuralreverberator).
 
 # Slides
-You can see the presentation slides here: [https://csteinmetz1.github.io/NeuralReverberator](https://csteinmetz1.github.io/NeuralReverberator)
+You can see the presentation slides here: [https://csteinmetz1.github.io/NeuralReverberator/slides](https://csteinmetz1.github.io/NeuralReverberator/slides)
 
 This work was presented as part of the [Audio Engineering Society MATLAB Plugin Competition](http://www.aes.org/students/awards/mpsc/) held at the [145th AES Convention](http://www.aes.org/events/145/) in NYC where
 NeuralReveberator was given the [Silver Award](http://www.aes.org/students/blog/2019/7/aes-student-competition-matlab-plugin-145followup).
